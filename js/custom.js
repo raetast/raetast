@@ -22,6 +22,7 @@
     });
 
 
+<<<<<<< HEAD
     // work
 
     $('.owl-work').owlCarousel({
@@ -48,6 +49,8 @@
     });
 
 
+=======
+>>>>>>> 55b91b2 (renewed)
     // SMOOTHSCROLL
     $(function() {
       $('.custom-navbar a, #home a').on('click', function(event) {
