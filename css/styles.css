@@ -10,7 +10,7 @@
 
 html {
   font-size: 18px;
-  overflow-x: hidden;
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -18,10 +18,9 @@ body {
   background: var(--accent-2);
   color: var(--text-muted);
   font-family: "Playfair", serif;
-  overflow-x: hidden;
+  overflow: hidden;
   margin: 0;
   min-height: 100vh;
-  padding-bottom: 60px;
 }
 
 h1,
