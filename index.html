@@ -33,7 +33,7 @@
 <body id="top" data-spy="scroll" data-target=".navbar-collapse" data-offset="50">
 
   <!-- menu -->
-  <section class="navbar role="navigation">
+  <section class="navbar role=" navigation">
     <div class="container">
       <a href="#top" aria-label="Rætast home">
         <img src="img/logo.svg" class="logo" alt="Rætast logo" />
@@ -64,18 +64,32 @@
           </div>
           <div class="info-grid">
             <div>
-              <h3>Soilmate</h3>
-              <p>Worm tower project</p>
+              <div class="info-link info-tooltip" data-tooltip="Work in progress">
+                <h3>⏳ Life timeline</h3>
+                <p>A project that maps your life in time.</p>
+              </div>
+            </div>
+            <div>
+              <div class="info-link info-tooltip" data-tooltip="Work in progress">
+                <h3>Untitled</h3>
+                <p>In development</p>
+              </div>
+            </div>
+            <div>
+              <div class="info-link info-tooltip" data-tooltip="Work in progress">
+                <h3>🌱 Soilmate</h3>
+                <p>Worm tower project</p>
+              </div>
             </div>
             <div>
               <a class="info-link" href="https://nuoy.app" target="_blank" rel="noopener noreferrer">
-                <h3>Nuoy</h3>
+                <h3>🎧 Nuoy</h3>
                 <p>Nuoy pulls music from YouTube, SoundCloud, and Bandcamp into one clean, fast playlist.</p>
               </a>
             </div>
             <div>
               <a class="info-link" href="https://pixact.ly" target="_blank" rel="noopener noreferrer">
-                <h3>Pixactly</h3>
+                <h3>🎲 Pixactly</h3>
                 <p>A pixel-guessing game to sharpen your eye for exact sizes.</p>
               </a>
             </div>
@@ -91,6 +105,19 @@
       <p>raetast[at]gmail.com • Copyright © 2025 Rætast.</p>
     </div>
   </footer>
+
+  <script>
+    const tooltip = document.querySelector('.info-tooltip');
+    if (tooltip) {
+      tooltip.addEventListener('mousemove', (event) => {
+        const rect = tooltip.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        tooltip.style.setProperty('--tooltip-x', `${x}px`);
+        tooltip.style.setProperty('--tooltip-y', `${y}px`);
+      });
+    }
+  </script>
 </body>
 
 </html>

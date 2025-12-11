@@ -73,7 +73,7 @@ h4 {
 p {
   font-size: 1rem;
   font-weight: 500;
-  line-height: 1.4;
+  line-height: 1.3;
   margin: 0;
 }
 
@@ -220,14 +220,16 @@ footer .container {
   display: block;
   color: inherit;
   text-decoration: none;
+  padding: 10px;
   transition: color 0.25s ease, transform 0.25s ease;
 }
 
 .info-link:before {
   content: "";
   position: absolute;
-  inset: -8px;
-  border-radius: 4px;
+  inset: 0;
+  background: rgba(99, 40, 47, 0.75);
+  border-radius: 8px;
   opacity: 0;
   transition: opacity 0.25s ease;
   z-index: -1;
@@ -236,7 +238,39 @@ footer .container {
 .info-link:hover {
   color: var(--accent-4);
   text-decoration: none;
-  text-shadow: var(--text-muted) 1px 1px 2px;
+  text-shadow: none;
+}
+
+.info-link:hover:before {
+  opacity: 1;
+}
+
+.info-tooltip {
+  --tooltip-x: 50%;
+  --tooltip-y: 0;
+  cursor: progress;
+  color: var(--accent-3);
+}
+
+.info-tooltip:after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: var(--tooltip-x);
+  top: var(--tooltip-y);
+  transform: translate(-50%, calc(-100% - 8px));
+  padding: 4px 8px;
+  background: var(--text-muted);
+  color: var(--accent-2);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.info-tooltip:hover:after {
+  opacity: 1;
 }
 
 footer {
