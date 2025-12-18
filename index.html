@@ -63,6 +63,10 @@
             </div>
           </div>
           <div class="info-grid">
+            <div class="info-intro">
+              <h3>About</h3>
+              <p>My name is <a href="http://davidgogh.com/" target="_blank" rel="noopener noreferrer">David Gogh</a> and Rætast is my personal studio alias for freelance work and personal projects. It is a collection of projects and experiments that move from digital to tangible. “Rætast” is Icelandic for “to come true”.<br />raetast[at]gmail.com</p>
+            </div>
             <div>
               <div class="info-link info-tooltip" data-tooltip="Work in progress">
                 <h3>⏳ Life timeline</h3>
@@ -71,7 +75,7 @@
             </div>
             <div>
               <div class="info-link info-tooltip" data-tooltip="Work in progress">
-                <h3>Untitled</h3>
+                <h3>👀 Untitled</h3>
                 <p>In development</p>
               </div>
             </div>
@@ -102,22 +106,11 @@
   <!-- footer -->
   <footer id="footer">
     <div class="container">
-      <p>raetast[at]gmail.com • Copyright © 2025 Rætast.</p>
+      <p>Copyright © 2025 Rætast.</p>
     </div>
   </footer>
 
-  <script>
-    const tooltip = document.querySelector('.info-tooltip');
-    if (tooltip) {
-      tooltip.addEventListener('mousemove', (event) => {
-        const rect = tooltip.getBoundingClientRect();
-        const x = event.clientX - rect.left;
-        const y = event.clientY - rect.top;
-        tooltip.style.setProperty('--tooltip-x', `${x}px`);
-        tooltip.style.setProperty('--tooltip-y', `${y}px`);
-      });
-    }
-  </script>
+  <script src="_js/main.js"></script>
 </body>
 
 </html>

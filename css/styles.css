@@ -23,6 +23,16 @@ body {
   min-height: 100vh;
 }
 
+::selection {
+  background: var(--accent-3);
+  color: var(--text-muted);
+}
+
+::-moz-selection {
+  background: var(--accent-3);
+  color: var(--text-muted);
+}
+
 h1,
 h2,
 h3,
@@ -83,6 +93,13 @@ a {
   text-decoration: none;
 }
 
+a:hover,
+a:focus-visible {
+  text-decoration: dashed underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
 section {
   position: relative;
 }
@@ -95,7 +112,7 @@ section {
 
 .navbar {
   position: fixed;
-  padding: 10px 0;
+  padding: 20px 0;
   width: 100%;
   z-index: 999;
 }
@@ -128,7 +145,7 @@ footer .container {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 140px 16px 140px;
+  padding: 60px 16px 100px;
   width: 100vw;
   margin-left: calc(50% - 50vw);
   margin-right: calc(50% - 50vw);
@@ -215,6 +232,12 @@ footer .container {
   margin: 40px auto 80px auto;
 }
 
+.info-intro {
+  grid-column: span 3;
+  color: var(--accent-4);
+  padding: 10px;
+}
+
 .info-link {
   position: relative;
   display: block;
@@ -222,6 +245,14 @@ footer .container {
   text-decoration: none;
   padding: 10px;
   transition: color 0.25s ease, transform 0.25s ease;
+}
+
+.info-link:not(.info-tooltip) {
+  cursor: pointer;
+}
+
+.info-link:not(.info-tooltip) * {
+  cursor: pointer;
 }
 
 .info-link:before {
@@ -248,8 +279,13 @@ footer .container {
 .info-tooltip {
   --tooltip-x: 50%;
   --tooltip-y: 0;
-  cursor: progress;
+  cursor: progress !important;
   color: var(--accent-3);
+}
+
+.info-tooltip,
+.info-tooltip * {
+  cursor: progress !important;
 }
 
 .info-tooltip:after {
