@@ -8,9 +8,16 @@
   --text-muted: #333;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html {
   font-size: 18px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -18,7 +25,8 @@ body {
   background: var(--accent-2);
   color: var(--text-muted);
   font-family: "Playfair", serif;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   margin: 0;
   min-height: 100vh;
 }
@@ -88,7 +96,7 @@ p {
 }
 
 a {
-  color: var(--text-muted);
+  color: var(--accent-4);
   transition: 0.5s;
   text-decoration: none;
 }
@@ -133,6 +141,7 @@ footer .container {
 #home {
   padding: 0;
   min-height: 100vh;
+
 }
 
 .row {
@@ -145,20 +154,22 @@ footer .container {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 60px 16px 100px;
-  width: 100vw;
-  margin-left: calc(50% - 50vw);
-  margin-right: calc(50% - 50vw);
+  padding: 60px 30px 100px;
+  width: 100%;
+  margin: 0 auto;
+  overflow-x: hidden;
   position: relative;
 }
 
 .stage-wrap {
-  position: absolute;
+  position: fixed;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  width: 100vw;
+  height: 100vh;
   transform: translateY(-10%);
 }
 
@@ -177,7 +188,7 @@ footer .container {
   transform-style: preserve-3d;
   animation: tilt-wobble 5s infinite alternate ease-in-out -7.5s;
   animation-fill-mode: forwards;
-  transform: rotateY(20deg) rotateX(20deg) translateZ(0);
+  transform: rotateY(10deg) rotateX(10deg) translateZ(0);
 }
 
 .layer:after {
@@ -228,23 +239,25 @@ footer .container {
   gap: 60px;
   max-width: 1020px;
   width: 100%;
-  padding: 0 30px;
   margin: 40px auto 80px auto;
 }
 
 .info-intro {
   grid-column: span 3;
-  color: var(--accent-4);
   padding: 10px;
 }
 
 .info-link {
   position: relative;
   display: block;
-  color: inherit;
+  color: var(--text-muted);
   text-decoration: none;
   padding: 10px;
   transition: color 0.25s ease, transform 0.25s ease;
+}
+
+.info-link h3 {
+  white-space: nowrap;
 }
 
 .info-link:not(.info-tooltip) {
@@ -328,20 +341,23 @@ footer p {
 @media only screen and (max-width: 992px) {
 }
 
-@media only screen and (min-width: 768px) and (max-width: 991px) {
-  .info-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 @media only screen and (max-width: 767px) {
   h1 {
     font-size: 2.5em;
   }
 
   .info-grid {
-    grid-template-columns: 1fr;
     gap: 40px;
     margin-bottom: 60px;
+  }
+}
+
+@media only screen and (max-width: 600px) {
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .info-intro {
+    grid-column: auto;
   }
 }
