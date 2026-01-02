@@ -60,21 +60,10 @@ h1 {
   color: var(--accent-4);
 }
 
-h2 {
-  margin: auto;
-  background-clip: text;
-  -webkit-background-clip: text;
-  font-size: clamp(1.6rem, 3vw, 2.4rem);
-}
-
 h3 {
   font-size: 1.2rem;
   font-weight: 500;
   margin-bottom: 4px;
-}
-
-h4 {
-  font-size: 1rem;
 }
 
 .visually-hidden {
@@ -112,12 +101,6 @@ section {
   position: relative;
 }
 
-@keyframes spinner {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .navbar {
   position: fixed;
   padding: 20px 0;
@@ -150,7 +133,6 @@ footer .container {
 }
 
 .landing {
-  background-color: var(--bg-light);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -174,7 +156,7 @@ footer .container {
 }
 
 .stage {
-  width: min(640px, 92vw);
+  width: 100vw;
   margin: auto;
   position: relative;
   perspective: 1000px;
@@ -192,7 +174,7 @@ footer .container {
 }
 
 .layer:after {
-  font: clamp(56px, 14vw, 140px)/0.9 "fairplay display", serif;
+  font: clamp(56px, 14vw, 140px)/0.9 "Playfair Display", serif;
   content: "Rætast is not\a an agency";
   white-space: pre;
   text-align: center;
@@ -214,15 +196,6 @@ footer .container {
 .layer:nth-child(9):after { transform: translateZ(-12px); }
 .layer:nth-child(10):after { transform: translateZ(-13.5px); }
 .layer:nth-child(11):after { transform: translateZ(-15px); }
-.layer:nth-child(12):after { transform: translateZ(-16.5px); }
-.layer:nth-child(13):after { transform: translateZ(-18px); }
-.layer:nth-child(14):after { transform: translateZ(-19.5px); }
-.layer:nth-child(15):after { transform: translateZ(-21px); }
-.layer:nth-child(16):after { transform: translateZ(-22.5px); }
-.layer:nth-child(17):after { transform: translateZ(-24px); }
-.layer:nth-child(18):after { transform: translateZ(-25.5px); }
-.layer:nth-child(19):after { transform: translateZ(-27px); }
-.layer:nth-child(20):after { transform: translateZ(-28.5px); }
 .layer:first-child:after { color: var(--accent-2); text-shadow: none; }
 
 @keyframes tilt-wobble {
@@ -333,12 +306,6 @@ footer {
 footer p {
   font-size: 14px;
   color: var(--accent-4);
-}
-
-@media screen and (max-width: 1200px) {
-}
-
-@media only screen and (max-width: 992px) {
 }
 
 @media only screen and (max-width: 767px) {

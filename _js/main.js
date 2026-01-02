@@ -1,5 +1,5 @@
-const tooltip = document.querySelector('.info-tooltip');
-if (tooltip) {
+const tooltips = document.querySelectorAll('.info-tooltip');
+tooltips.forEach((tooltip) => {
   tooltip.addEventListener('mousemove', (event) => {
     const rect = tooltip.getBoundingClientRect();
     const x = event.clientX - rect.left;
@@ -7,4 +7,4 @@ if (tooltip) {
     tooltip.style.setProperty('--tooltip-x', `${x}px`);
     tooltip.style.setProperty('--tooltip-y', `${y}px`);
   });
-}
+});
