@@ -8,3 +8,8 @@ tooltips.forEach((tooltip) => {
     tooltip.style.setProperty('--tooltip-y', `${y}px`);
   });
 });
+
+const currentYear = document.getElementById('current-year');
+if (currentYear) {
+  currentYear.textContent = new Date().getFullYear();
+}
