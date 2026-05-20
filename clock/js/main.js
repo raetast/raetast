@@ -11,7 +11,6 @@ const lifeCalendarHeading = document.getElementById("life-calendar-heading");
 const lifeGrid = document.getElementById("life-grid");
 const lifeBoxes = document.getElementById("life-boxes");
 const weekTooltip = document.getElementById("week-tooltip");
-const copyrightYear = document.getElementById("copyright-year");
 const resultsSharePanel = document.getElementById("results-share-panel");
 
 const today = new Date();
@@ -1027,8 +1026,8 @@ async function buildClockShareCanvas(state) {
   ctx.fillStyle = text;
   ctx.textAlign = "left";
   ctx.font = `500 55px ${CANVAS_FONT_FAMILY}`;
-  const signatureUrl = "lifeclock.cc";
-  const signatureTag = "#mylifeclock";
+  const signatureUrl = "raetast.com/clock";
+  const signatureTag = "#thelifeclock";
   ctx.fillText(signatureUrl, 60, height - 80);
   ctx.textAlign = "right";
   ctx.fillText(signatureTag, width - 60, height - 80);
@@ -1141,8 +1140,8 @@ function buildGridShareCanvas(stats) {
 
   ctx.fillStyle = text;
   ctx.font = `500 55px ${CANVAS_FONT_FAMILY}`;
-  const signatureUrl = "lifeclock.cc";
-  const signatureTag = "#mylifeclock";
+  const signatureUrl = "raetast.com/clock";
+  const signatureTag = "#thelifeclock";
   ctx.textAlign = "left";
   ctx.fillText(signatureUrl, 60, height - 80);
   ctx.textAlign = "right";
@@ -2210,8 +2209,8 @@ function buildSocialShareText(includeEmoji = false) {
   return (
     "My life stats right now:\n" +
     `${timeEmoji}${readout} · ${weekEmoji}Week ${weeks}\n` +
-    "Check yours at https://lifeclock.cc\n" +
-    "#mylifeclock"
+    "Check yours at https://raetast.com/clock/\n" +
+    "#thelifeclock"
   );
 }
 
