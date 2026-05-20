@@ -1,2 +1,6 @@
 .DS_Store
 _design
+_archive
+clock/css/preview.css
+clock/js/preview.js
+clock/js/local-config.js

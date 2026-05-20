@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Life Clock</title>
+  <meta name="description" content="Enter your date of birth to map your life in weeks. See the time behind you, the time ahead, and the space you still have to begin again." />
+  <meta name="robots" content="index,follow" />
+  <meta property="og:title" content="The Life Clock" />
+  <meta property="og:description" content="Enter your date of birth to map your life in weeks. See the time behind you, the time ahead, and the space you still have to begin again." />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:image" content="https://lifeclock.cc/og_lifeclock.png" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="The Life Clock" />
+  <meta name="twitter:description" content="Enter your date of birth to map your life in weeks. See the time behind you, the time ahead, and the space you still have to begin again." />
+  <meta name="twitter:image" content="https://lifeclock.cc/og_lifeclock.png" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⏰</text></svg>">
+  <link rel="stylesheet" href="css/styles.css?v=75" />
+  <script>
+    (function () {
+      const host = window.location.hostname;
+      const isLocal =
+        host === "localhost" || host === "127.0.0.1" || host === "::1";
+      if (!isLocal) return;
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "css/preview.css";
+      document.head.appendChild(link);
+    })();
+  </script>
+  <!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-QJ2QT2CQQK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-QJ2QT2CQQK');
+</script>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3596538215842644"
+     crossorigin="anonymous"></script>
+</head>
+
+<body>
+  <main class="page-shell">
+    <section class="clock-experience">
+      <div class="clock-flip-stage">
+        <div class="clock-flip-card">
+          <section class="form-shell clock-flip-face clock-flip-back">
+            <h1 class="brand-title" aria-label="The Life Clock">
+              <span class="brand-title-kicker">· The ·</span>
+              <span class="brand-title-main">Life Clock</span>
+            </h1>
+            <form id="dob-form" novalidate>
+              <div class="form-row">
+                <div class="field">
+                  <input type="text" id="dob" inputmode="numeric" pattern="[0-9-]*" maxlength="10"
+                    placeholder="YYYY-MM-DD" aria-label="Date of birth" autocomplete="bday"
+                    aria-describedby="dob-error" required />
+                  <div class="dob-error-tooltip" id="dob-error" role="alert" hidden></div>
+                </div>
+              </div>
+              <div class="actions">
+                <button type="submit" class="primary">Map my life</button>
+              </div>
+            </form>
+          </section>
+          <div class="clock-flip-face clock-flip-front" aria-hidden="true">
+            <div class="clock-face-wrap">
+              <div class="clock-face">
+                <div class="day-night-indicator" aria-hidden="true">
+                  <div class="day-night-mask">
+                    <div class="day-night-disk" id="day-night-disk">
+                      <span class="night-icon" aria-hidden="true">🌜</span>
+                      <span class="day-icon" aria-hidden="true">🌞</span>
+                      <div class="cloud-orbit cloud-orbit-back" aria-hidden="true">
+                        <span class="cloud-icon">☁️</span>
+                        <span class="cloud-icon cloud-icon-opposite">☁️</span>
+                      </div>
+                      <div class="cloud-orbit cloud-orbit-front" aria-hidden="true">
+                        <span class="cloud-icon">☁️</span>
+                        <span class="cloud-icon cloud-icon-opposite">☁️</span>
+                      </div>
+                      <div class="night-stars" aria-hidden="true">
+                        <span class="star"></span>
+                        <span class="star"></span>
+                        <span class="star"></span>
+                        <span class="star"></span>
+                        <span class="star"></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="day-night-center" aria-hidden="true"></div>
+                </div>
+                <div class="clock-hand hour" id="hour-hand"></div>
+                <div class="clock-hand minute" id="minute-hand"></div>
+                <div class="clock-center"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="clock-panel" id="clock-panel" hidden>
+      <div class="results-share-bar" aria-label="Share results">
+        <h2 class="results-share-title">Share your stats</h2>
+        <div class="share-menu-list" id="results-share-panel" data-share-source="clock" data-static="true">
+          <button type="button" class="secondary share-menu-item" data-share-target="x" aria-label="X">
+            <span aria-hidden="true" class="x-icon" role="img"></span>
+          </button>
+          <button type="button" class="secondary share-menu-item" data-share-target="threads" aria-label="Threads">
+            <span aria-hidden="true" class="threads-icon" role="img"></span>
+          </button>
+        </div>
+      </div>
+    </section>
+    <section class="grid-wrap">
+      <section class="life-grid card" id="life-grid" hidden>
+        <div class="life-grid-inner">
+          <div class="life-header">
+            <div class="life-titles">
+              <h1 class="life-title" id="life-calendar-heading"></h1>
+              <h3 class="life-title" id="weeks-lived-heading"></h3>
+            </div>
+          </div>
+          <div class="life-boxes" id="life-boxes"></div>
+          <div class="life-footer">
+            <h3 class="life-footer-left">lifeclock.cc</h3>
+            <h3 class="life-footer-right">#mylifeclock</h3>
+          </div>
+        </div>
+      </section>
+      <p class="caption" id="clock-caption"></p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Copyright © <span id="copyright-year">2025</span>
+    <a href="https://raetast.com/" target="_blank" rel="noopener">Rætast</a>.
+    All rights reserved. v2.0
+  </footer>
+
+  <div class="week-tooltip" id="week-tooltip" hidden></div>
+
+  <script>
+    (function () {
+      const host = window.location.hostname;
+      const isLocal =
+        host === "localhost" || host === "127.0.0.1" || host === "::1";
+      if (!isLocal) return;
+      document.write('<script src="js/local-config.js"><\/script>');
+    })();
+  </script>
+  <script src="js/main.js?v=56"></script>
+  <script>
+    (function () {
+      const host = window.location.hostname;
+      const isLocal =
+        host === "localhost" || host === "127.0.0.1" || host === "::1";
+      if (!isLocal) return;
+      const script = document.createElement("script");
+      script.src = "js/preview.js";
+      document.body.appendChild(script);
+    })();
+  </script>
+</body>
+
+</html>
