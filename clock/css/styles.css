@@ -420,18 +420,27 @@ body.has-results .clock-flip-back {
 }
 
 .clock-flip-back input[type="text"] {
+  --dob-rule-color: rgba(var(--page-bg-rgb), 0.25);
   height: clamp(38px, 6.4vmin, 44px);
   padding: 8px 0 10px;
   border: 0;
-  border-bottom: 1px solid rgba(var(--page-bg-rgb), 0.25);
   border-radius: 0;
-  background: transparent;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0,
+      var(--dob-rule-color) 16%,
+      var(--dob-rule-color) 84%,
+      transparent 100%
+    )
+    center bottom / 100% 1px no-repeat;
   color: var(--page-bg);
   box-shadow: none;
   font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
   font-size: var(--clock-small-type);
   font-weight: 300;
   text-align: center;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .clock-flip-back input[type="text"]::placeholder {
@@ -439,12 +448,12 @@ body.has-results .clock-flip-back {
 }
 
 .clock-flip-back input[type="text"]:focus {
-  border-color: rgba(var(--page-bg-rgb), 0.92);
+  --dob-rule-color: rgba(var(--page-bg-rgb), 0.92);
   box-shadow: none;
 }
 
 .clock-flip-back input[type="text"][aria-invalid="true"] {
-  border-color: rgba(var(--muted-rgb), 0.92);
+  --dob-rule-color: rgba(var(--muted-rgb), 0.92);
 }
 
 .dob-error-tooltip {
