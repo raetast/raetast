@@ -12,6 +12,7 @@ const lifeGrid = document.getElementById("life-grid");
 const lifeBoxes = document.getElementById("life-boxes");
 const weekTooltip = document.getElementById("week-tooltip");
 const resultsSharePanel = document.getElementById("results-share-panel");
+const copyrightYear = document.getElementById("copyright-year");
 
 const today = new Date();
 today.setHours(0, 0, 0, 0);
@@ -55,7 +56,7 @@ let clockMotionTimer = null;
 let pendulumStartedAt = performance.now();
 let pendingClockVisualState = null;
 let lifeMapFillObserver = null;
-// QA toggle: set window.QA_MODE in js/local-config.js or use ?qa=1.
+// QA toggle: set window.QA_MODE before this script loads or use ?qa=1.
 const QA_MODE =
   window.QA_MODE === true ||
   new URLSearchParams(window.location.search).get("qa") === "1";
@@ -1218,26 +1219,6 @@ async function shareCanvas(canvas, filename, button, text) {
   });
 }
 
-function previewCanvas(canvas, target) {
-  if (!canvas) return false;
-  const holder = target || document.body;
-  const existing = holder.querySelector(".share-preview");
-  if (existing) {
-    existing.remove();
-    return false;
-  }
-  const img = document.createElement("img");
-  img.className = "share-preview";
-  img.src = canvas.toDataURL("image/png");
-  img.alt = "Share preview";
-  img.style.maxWidth = "100%";
-  img.style.marginTop = "16px";
-  holder.appendChild(img);
-  if (holder.scrollIntoView)
-    holder.scrollIntoView({ behavior: "smooth", block: "center" });
-  return true;
-}
-
 let pinnedTooltipBox = null;
 let selectedWeekBox = null;
 let hoveredWeekBox = null;
@@ -2193,14 +2174,6 @@ function guardShare(button) {
   return true;
 }
 
-function buildClockShareText(includeEmoji = false) {
-  return buildSocialShareText(includeEmoji);
-}
-
-function buildGridShareText(includeEmoji = false) {
-  return buildSocialShareText(includeEmoji);
-}
-
 function buildSocialShareText(includeEmoji = false) {
   const readout = lastClockState ? lastClockState.readout : "xx:xx";
   const weeks = lastGridStats ? lastGridStats.weeksLived.toLocaleString() : "—";
@@ -2214,39 +2187,8 @@ function buildSocialShareText(includeEmoji = false) {
   );
 }
 
-async function copyTextToClipboard(text) {
-  if (!text) return false;
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch (err) {
-    console.warn("Clipboard write failed, falling back.", err);
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "absolute";
-  textarea.style.left = "-9999px";
-  document.body.appendChild(textarea);
-  textarea.select();
-  textarea.setSelectionRange(0, textarea.value.length);
-  const ok = document.execCommand("copy");
-  textarea.remove();
-  return ok;
-}
-
 function openShareUrl(url) {
   window.open(url, "_blank", "noopener");
-}
-
-function toggleShareMenu(panel, forceOpen) {
-  if (!panel) return;
-  if (panel.dataset.static === "true") return;
-  const shouldOpen = typeof forceOpen === "boolean" ? forceOpen : panel.hidden;
-  panel.hidden = !shouldOpen;
 }
 
 function handleShareMenuClick(event) {
@@ -2261,18 +2203,17 @@ function handleShareMenuClick(event) {
   if (source === "clock") {
     if (!lastClockState) {
       alert("Nothing to share yet—try submitting first.");
-      toggleShareMenu(panel, false);
       return;
     }
     buildClockShareCanvas(lastClockState).then((canvas) => {
-      const shareText = encodeURIComponent(buildClockShareText(target === "x"));
+      const shareText = encodeURIComponent(buildSocialShareText(target === "x"));
       const filenameBase = "my";
       const clockFilename = `${filenameBase}-lifeclock.png`;
       if (target === "download") {
-        saveImageFromCanvas(canvas, clockFilename, buildClockShareText(true));
+        saveImageFromCanvas(canvas, clockFilename, buildSocialShareText(true));
       } else if (target === "share") {
         if (!guardShare(button)) return;
-        shareCanvas(canvas, clockFilename, button, buildClockShareText(true)).then(
+        shareCanvas(canvas, clockFilename, button, buildSocialShareText(true)).then(
           (result) => {
             if (result === "unsupported") {
               alert("Sharing isn't supported on this device.");
@@ -2288,18 +2229,17 @@ function handleShareMenuClick(event) {
   } else if (source === "grid") {
     if (!lastGridStats) {
       alert("Nothing to share yet—try submitting first.");
-      toggleShareMenu(panel, false);
       return;
     }
     const canvas = buildGridShareCanvas(lastGridStats);
-    const shareText = encodeURIComponent(buildGridShareText(target === "x"));
+    const shareText = encodeURIComponent(buildSocialShareText(target === "x"));
     const filenameBase = "my";
     const gridFilename = `${filenameBase}-lifemap.png`;
     if (target === "download") {
-      saveImageFromCanvas(canvas, gridFilename, buildGridShareText(true));
+      saveImageFromCanvas(canvas, gridFilename, buildSocialShareText(true));
     } else if (target === "share") {
       if (!guardShare(button)) return;
-      shareCanvas(canvas, gridFilename, button, buildGridShareText(true)).then(
+      shareCanvas(canvas, gridFilename, button, buildSocialShareText(true)).then(
         (result) => {
           if (result === "unsupported") {
             alert("Sharing isn't supported on this device.");
@@ -2312,7 +2252,6 @@ function handleShareMenuClick(event) {
       openShareUrl(`https://www.threads.net/intent/post?text=${shareText}`);
     }
   }
-  toggleShareMenu(panel, false);
 }
 
 if (resultsSharePanel) {

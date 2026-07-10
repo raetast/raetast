@@ -18,19 +18,10 @@
   <meta name="twitter:description" content="Enter your date of birth to map your life in weeks. See the time behind you, the time ahead, and the space you still have to begin again." />
   <meta name="twitter:image" content="https://raetast.com/clock/assets/og_lifeclock.png" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⏰</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,200..900;1,6..96,200..900&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" />
   <link rel="stylesheet" href="css/styles.css?v=75" />
-  <script>
-    (function () {
-      const host = window.location.hostname;
-      const isLocal =
-        host === "localhost" || host === "127.0.0.1" || host === "::1";
-      if (!isLocal) return;
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = "css/preview.css";
-      document.head.appendChild(link);
-    })();
-  </script>
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-E0483FCLLG"></script>
   <script>
@@ -136,32 +127,12 @@
 
   <footer class="site-footer">
     <a href="https://raetast.com/" target="_blank" rel="noopener">Rætast Lab</a>
-     · 2025
+     · <span id="copyright-year">2025</span>
   </footer>
 
   <div class="week-tooltip" id="week-tooltip" hidden></div>
 
-  <script>
-    (function () {
-      const host = window.location.hostname;
-      const isLocal =
-        host === "localhost" || host === "127.0.0.1" || host === "::1";
-      if (!isLocal) return;
-      document.write('<script src="js/local-config.js"><\/script>');
-    })();
-  </script>
-  <script src="js/main.js?v=56"></script>
-  <script>
-    (function () {
-      const host = window.location.hostname;
-      const isLocal =
-        host === "localhost" || host === "127.0.0.1" || host === "::1";
-      if (!isLocal) return;
-      const script = document.createElement("script");
-      script.src = "js/preview.js";
-      document.body.appendChild(script);
-    })();
-  </script>
+  <script src="js/main.js?v=57"></script>
 </body>
 
 </html>

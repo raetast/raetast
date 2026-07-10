@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,200..900;1,6..96,200..900&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap");
-
 :root {
   --page-bg: #f7f5ef;
   --page-bg-rgb: 247, 245, 239;
@@ -49,12 +47,7 @@ body {
   transition: background-color 0.35s ease;
 }
 
-body:not(.has-results) {
-  overflow-x: hidden;
-  overflow-y: scroll;
-  scrollbar-color: transparent transparent;
-}
-
+body:not(.has-results),
 body.is-flipping {
   overflow-x: hidden;
   overflow-y: scroll;
@@ -109,10 +102,6 @@ a:hover {
   position: relative;
   z-index: 1;
   transition: gap 0.35s ease;
-}
-
-body:not(.has-results) .page-shell {
-  min-height: 100dvh;
 }
 
 body.has-results .page-shell {
@@ -188,10 +177,6 @@ body.is-flipping .site-footer {
   margin: 0 auto;
   transform: translateY(0);
   transition: transform 2s cubic-bezier(0.33, 1, 0.68, 1);
-}
-
-body:not(.has-results) .form-shell {
-  margin: auto;
 }
 
 .form-shell h1 {
@@ -392,14 +377,6 @@ body.has-results .clock-flip-back {
   white-space: nowrap;
 }
 
-.clock-flip-back .form-subcopy {
-  max-width: min(72%, 370px);
-  color: rgba(var(--page-bg-rgb), 0.82);
-  font-size: clamp(11px, 2.05vmin, 15px);
-  line-height: 1.34;
-  margin: 0;
-}
-
 .clock-flip-back form {
   width: min(56%, 290px);
   margin-top: clamp(20px, 4.2vmin, 36px);
@@ -563,14 +540,6 @@ h3 {
   font-size: clamp(18px, 4vw, 22px);
 }
 
-.form-subcopy {
-  text-align: center;
-  font-weight: 400;
-  font-size: clamp(16px, 3vw, 22px);
-  color: var(--text);
-  line-height: 1.4;
-}
-
 form {
   margin-top: 40px;
   display: flex;
@@ -592,18 +561,11 @@ form {
   padding-bottom: 42px;
 }
 
-label {
-  display: block;
-  color: var(--muted);
-  text-align: left;
-}
-
 input::placeholder {
   color: var(--muted);
   opacity: 1;
 }
 
-input[type="date"],
 input[type="text"] {
   width: 100%;
   height: 48px;
@@ -617,7 +579,6 @@ input[type="text"] {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-input[type="date"]:focus,
 input[type="text"]:focus {
   outline: none;
   border-color: var(--accent);
@@ -900,11 +861,6 @@ body.has-results .clock-panel.is-visible {
     height: clamp(2px, calc(var(--life-box-size, 15px) * 0.22), 4px);
     opacity: 0.58;
   }
-}
-
-.section-title {
-  margin-top: 100px;
-  text-align: center;
 }
 
 body:not(.has-results) .grid-wrap,
