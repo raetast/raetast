@@ -114,6 +114,7 @@ body.has-results .page-shell {
   width: 100%;
   text-align: center;
   color: var(--text);
+  background: var(--page-bg);
   font-size: 14px;
   position: fixed;
   bottom: 0;
@@ -196,8 +197,7 @@ body.is-flipping .site-footer {
 }
 
 body:not(.has-results) .clock-experience {
-  position: fixed;
-  inset: 0;
+  position: relative;
   width: 100%;
   min-height: 100dvh;
   z-index: 2;
@@ -1230,6 +1230,48 @@ body.is-clock-motion-reset .day-night-disk {
   text-underline-offset: 2px;
 }
 
+.clock-guide {
+  width: min(640px, 100%);
+  padding: 40px 0 88px;
+  border-top: 1px solid rgba(var(--text-rgb), 0.12);
+}
+
+.clock-guide h2 {
+  font-family: "Bodoni Moda", "Times New Roman", serif;
+  font-weight: 400;
+}
+
+.clock-guide p {
+  margin: 16px 0 0;
+  color: rgba(var(--text-rgb), 0.72);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.clock-guide-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 32px;
+  margin-top: 32px;
+}
+
+.clock-guide-details h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.clock-guide-details p {
+  margin-top: 12px;
+}
+
+@media (max-width: 600px) {
+  .clock-guide-details {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+}
+
 .life-grid {
   width: 100%;
   margin-top: 0;
@@ -1659,6 +1701,7 @@ body.is-clock-motion-reset .day-night-disk {
   .site-footer,
   .form-shell,
   .clock-experience,
+  .clock-guide,
   .caption {
     display: none !important;
   }
