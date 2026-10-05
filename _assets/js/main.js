@@ -1,11 +1,20 @@
 const tooltips = document.querySelectorAll('.info-tooltip');
 tooltips.forEach((tooltip) => {
+  let frame = null;
+  let pointer;
   tooltip.addEventListener('mousemove', (event) => {
-    const rect = tooltip.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    tooltip.style.setProperty('--tooltip-x', `${x}px`);
-    tooltip.style.setProperty('--tooltip-y', `${y}px`);
+    pointer = { x: event.clientX, y: event.clientY };
+    if (frame !== null) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      const rect = tooltip.getBoundingClientRect();
+      tooltip.style.setProperty('--tooltip-x', `${pointer.x - rect.left}px`);
+      tooltip.style.setProperty('--tooltip-y', `${pointer.y - rect.top}px`);
+    });
+  }, { passive: true });
+  tooltip.addEventListener('mouseleave', () => {
+    if (frame !== null) cancelAnimationFrame(frame);
+    frame = null;
   });
 });
 
@@ -51,15 +60,20 @@ function initHeadlineOrbit() {
     animations = layers.map(layer => {
       const animation = layer.animate(frames, { duration: 16000, iterations: Infinity });
       animation.startTime = startTime;
+      if (document.hidden) animation.pause();
       return animation;
     });
   };
 
   mobile.addEventListener('change', () => {
+    if (!animations.length) return;
     const frames = keyframes();
     animations.forEach(animation => animation.effect.setKeyframes(frames));
   });
   reduceMotion.addEventListener('change', updateMotion);
+  document.addEventListener('visibilitychange', () => {
+    animations.forEach(animation => document.hidden ? animation.pause() : animation.play());
+  });
   updateMotion();
 }
 
@@ -84,6 +98,8 @@ function initHeadlinePixels() {
     const seed = Math.sin(i * 127.1 + 311.7) * 43758.5453;
     return (seed - Math.floor(seed)) * Math.PI * 2;
   });
+  const swirlOffsets = Float64Array.from(phases, (_, i) => (i % size) * 0.49 + Math.floor(i / size) * 0.36);
+  const noiseRates = Float64Array.from(phases, phase => 1.4 + phase * 0.22);
   const palette = [
     [255, 170, 190], [255, 145, 156], [242, 109, 125], [220, 99, 114],
     [180, 81, 95], [139, 63, 74], [96, 46, 53], [60, 32, 37],
@@ -94,10 +110,14 @@ function initHeadlinePixels() {
   let lastPosition = null;
   let strength = 0;
   let frame = null;
+  let timer = null;
   let lastPaint = null;
+  let geometry = null;
 
   const reset = () => {
     if (frame !== null) cancelAnimationFrame(frame);
+    if (timer !== null) clearTimeout(timer);
+    timer = geometry = null;
     frame = lastPaint = null;
     pointer = lastPosition = null;
     pointerInside = false;
@@ -109,13 +129,23 @@ function initHeadlinePixels() {
   };
 
   const projectPointer = () => {
-    const bounds = stage.getBoundingClientRect();
+    // Only the animated transform changes between paints; cache the static geometry.
+    if (!geometry) {
+      const layerStyle = getComputedStyle(front);
+      const stageStyle = getComputedStyle(stage);
+      const [originX, originY] = layerStyle.transformOrigin.split(' ').map(parseFloat);
+      const [perspectiveX, perspectiveY] = stageStyle.perspectiveOrigin.split(' ').map(parseFloat);
+      geometry = {
+        bounds: stage.getBoundingClientRect(),
+        originX, originY, perspectiveX, perspectiveY,
+        perspective: parseFloat(stageStyle.perspective),
+        width: stage.offsetWidth,
+        height: parseFloat(getComputedStyle(front, '::after').height),
+      };
+    }
+    const { bounds, originX, originY, perspectiveX, perspectiveY, perspective, width, height } = geometry;
     const layerStyle = getComputedStyle(front);
-    const stageStyle = getComputedStyle(stage);
     const matrix = new DOMMatrixReadOnly(layerStyle.transform);
-    const [originX, originY] = layerStyle.transformOrigin.split(' ').map(parseFloat);
-    const [perspectiveX, perspectiveY] = stageStyle.perspectiveOrigin.split(' ').map(parseFloat);
-    const perspective = parseFloat(stageStyle.perspective);
     const u = pointer.x - bounds.left - perspectiveX;
     const v = pointer.y - bounds.top - perspectiveY;
 
@@ -131,8 +161,8 @@ function initHeadlinePixels() {
     return {
       x: (d * x - b * y) / determinant + originX,
       y: (a * y - c * x) / determinant + originY,
-      width: stage.offsetWidth,
-      height: parseFloat(getComputedStyle(front, '::after').fontSize) * 1.8,
+      width,
+      height,
     };
   };
 
@@ -143,13 +173,14 @@ function initHeadlinePixels() {
     const satelliteX = center + Math.sin(time * 0.83 + 1.4) * 9;
     const satelliteY = center + Math.cos(time * 1.09) * 7.5;
     for (let y = 0; y < size; y++) {
+      const rowSwirl = Math.sin(y * 0.31 - time) * 2.8;
       for (let x = 0; x < size; x++) {
         const cell = y * size + x;
         const phase = phases[cell];
         const envelope = Math.max(0, 1 - Math.hypot(x - center - driftX, y - center - driftY) / 19.5);
         const satellite = Math.max(0, 1 - Math.hypot(x - satelliteX, y - satelliteY) / 10.5);
-        const swirl = Math.sin(x * 0.49 + y * 0.36 + time * 2.8 + Math.sin(y * 0.31 - time) * 2.8);
-        const noise = Math.sin(time * (1.4 + phase * 0.22) + phase);
+        const swirl = Math.sin(swirlOffsets[cell] + time * 2.8 + rowSwirl);
+        const noise = Math.sin(time * noiseRates[cell] + phase);
         const spark = Math.pow(Math.max(0, Math.sin(time * 2.3 + phase)), 10);
         const energy = Math.min(1, Math.max(0,
           envelope * (0.86 + swirl * 0.42 + noise * 0.3) +
@@ -168,39 +199,41 @@ function initHeadlinePixels() {
   };
 
   const animate = (timestamp) => {
+    frame = null;
     if (document.hidden || reduceMotion.matches || !finePointer.matches || !pointer) {
       reset();
       return;
     }
-    // Render a small texture at 16 fps, including its fade back to the original surface.
-    if (lastPaint === null || timestamp - lastPaint >= 1000 / 16) {
-      const position = projectPointer();
-      const nearHeadline = pointerInside && position &&
-        position.x >= 0 && position.x <= position.width &&
-        position.y >= -glowSize / 4 && position.y <= position.height + glowSize / 4;
-      const elapsed = lastPaint === null ? 1000 / 16 : timestamp - lastPaint;
-      strength += ((nearHeadline ? 1 : 0) - strength) * (1 - Math.exp(-elapsed / 90));
-      if (!nearHeadline && strength < 0.01) {
-        reset();
-        return;
-      }
-      if (nearHeadline) lastPosition = position;
-      if (lastPosition) {
-        stage.style.setProperty('--pixel-x', `${Math.round(lastPosition.x / cellSize) * cellSize - glowSize / 2}px`);
-        stage.style.setProperty('--pixel-y', `${Math.round(lastPosition.y / cellSize) * cellSize - glowSize / 2}px`);
-        paintTexture(timestamp / 1000);
-        stage.classList.add('pixel-active');
-      }
-      lastPaint = timestamp;
+    const position = projectPointer();
+    const nearHeadline = pointerInside && position &&
+      position.x >= 0 && position.x <= position.width &&
+      position.y >= -glowSize / 4 && position.y <= position.height + glowSize / 4;
+    const elapsed = lastPaint === null ? 1000 / 16 : timestamp - lastPaint;
+    strength += ((nearHeadline ? 1 : 0) - strength) * (1 - Math.exp(-elapsed / 90));
+    if (!nearHeadline && strength < 0.01) {
+      reset();
+      return;
     }
-    frame = requestAnimationFrame(animate);
+    if (nearHeadline) lastPosition = position;
+    if (lastPosition) {
+      stage.style.setProperty('--pixel-x', `${Math.round(lastPosition.x / cellSize) * cellSize - glowSize / 2}px`);
+      stage.style.setProperty('--pixel-y', `${Math.round(lastPosition.y / cellSize) * cellSize - glowSize / 2}px`);
+      paintTexture(timestamp / 1000);
+      stage.classList.add('pixel-active');
+    }
+    lastPaint = timestamp;
+    // Wake only for the next 16 fps paint, then align it with the browser's frame.
+    timer = setTimeout(() => {
+      timer = null;
+      frame = requestAnimationFrame(animate);
+    }, 1000 / 16);
   };
 
   window.addEventListener('pointermove', (event) => {
-    if (reduceMotion.matches || !finePointer.matches || event.pointerType === 'touch') return;
+    if (document.hidden || reduceMotion.matches || !finePointer.matches || event.pointerType === 'touch') return;
     pointer = { x: event.clientX, y: event.clientY };
     pointerInside = true;
-    if (frame === null) frame = requestAnimationFrame(animate);
+    if (frame === null && timer === null) frame = requestAnimationFrame(animate);
   }, { passive: true });
   document.documentElement.addEventListener('pointerleave', () => { pointerInside = false; });
   window.addEventListener('blur', reset);

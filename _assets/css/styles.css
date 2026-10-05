@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Playfair:ital,opsz,wght@0,5..1200,300..900;1,5..1200,300..900&display=swap');
-
 :root {
   --accent-1: #33cc99;
   --accent-2: #f26d7d;
@@ -178,14 +176,13 @@ footer .container {
   content: "Rætast is not\a an agency";
   white-space: pre;
   text-align: center;
-  height: 100%;
+  /* Cover both lines and their descenders when the front uses background-clip. */
+  height: 2.2em;
   width: 100%;
   position: absolute;
   color: var(--accent-4);
   filter: blur(var(--depth-blur, 0));
   opacity: var(--depth-opacity, 1);
-  will-change: filter, transform;
-  /* text-shadow: 2px 0 2px rgba(148, 41, 41, 0.1); */
 }
 
 .layer:nth-child(1):after { transform: translateZ(0px); --depth-blur: 0; }
@@ -204,7 +201,6 @@ footer .container {
 @supports ((background-clip: text) or (-webkit-background-clip: text)) {
   @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
     .stage.pixel-active .layer:first-child:after {
-      height: 1.8em;
       background-color: var(--accent-2);
       background-image: var(--pixel-texture);
       background-repeat: no-repeat;
