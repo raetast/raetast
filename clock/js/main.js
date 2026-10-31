@@ -9,10 +9,11 @@ const clockCaption = document.getElementById("clock-caption");
 const weeksLivedHeading = document.getElementById("weeks-lived-heading");
 const lifeCalendarHeading = document.getElementById("life-calendar-heading");
 const lifeGrid = document.getElementById("life-grid");
+const lifeGridGlass = lifeGrid?.querySelector(".life-grid-glass");
 const lifeBoxes = document.getElementById("life-boxes");
+const lifeGridInner = lifeGrid.querySelector(".life-grid-inner");
 const weekTooltip = document.getElementById("week-tooltip");
 const resultsSharePanel = document.getElementById("results-share-panel");
-const copyrightYear = document.getElementById("copyright-year");
 
 const today = new Date();
 today.setHours(0, 0, 0, 0);
@@ -30,6 +31,10 @@ const COMMONS_MEMBERS_PER_PAGE = 250;
 const COMMONS_CATEGORY_PAGE_LIMIT = 8;
 const NOTABLE_WEEK_COVERAGE_TARGET = 48;
 const WIKIDATA_ENTITY_BATCH_SIZE = 50;
+const NOTABLE_BATCH_CONCURRENCY = 4;
+const NOTABLE_PREFETCH_CONCURRENCY = 2;
+const NOTABLE_HOVER_DELAY_MS = 140;
+const NOTABLE_WORK_BUDGET_MS = 6;
 const MAX_TOOLTIP_NOTABLES = 3;
 const MIN_NOTABLE_SITELINKS = 1;
 const NOTABLE_CACHE_PREFIX = "lifeClock:notables:v1:";
@@ -38,34 +43,32 @@ let currentYearsDisplayed = 0;
 const DAY_MS = 24 * 60 * 60 * 1000;
 let lastGridStats = null;
 let lastClockState = null;
-let lastClockRatio = null;
-let clockFaceImagePromise = null;
 let lastDobDate = null;
-let cachedLifeBoxSize = null;
-let cachedLifeBoxGap = null;
 const BASE_LIFE_BOX_SIZE = 15;
 const BASE_LIFE_BOX_GAP = 2;
-const CANVAS_FONT_FAMILY = '"Inter", "Helvetica Neue", Arial, sans-serif';
 const PENDULUM_SWAY_DURATION_MS = 1000;
 const PENDULUM_CENTER_OFFSET_MS = PENDULUM_SWAY_DURATION_MS / 2;
 const MOBILE_NOTABLE_QUERY = "(max-width: 639px)";
 const NON_DESKTOP_NOTABLE_QUERY = "(max-width: 1023px)";
+const printMedia = window.matchMedia("print");
+let lifeGridScaleFrame = null;
+let printGridScale = false;
 let flipSettleTimer = null;
 let flipStartTimer = null;
 let clockMotionTimer = null;
 let pendulumStartedAt = performance.now();
 let pendingClockVisualState = null;
 let lifeMapFillObserver = null;
+let lifeGlassCutoutFrame = null;
+let lifeGlassGeometry = null;
+let lifeGlassMaskUrl = null;
+let lifeGlassMaskRevision = 0;
+let notableHoverTimer = null;
 // QA toggle: set window.QA_MODE before this script loads or use ?qa=1.
 const QA_MODE =
   window.QA_MODE === true ||
   new URLSearchParams(window.location.search).get("qa") === "1";
 const QA_FAKE_DOB = "1985-04-24";
-
-if (form) {
-  // Use the in-app tooltip instead of browser-native validation bubbles.
-  form.noValidate = true;
-}
 
 requestAnimationFrame(() => {
   pendulumStartedAt = performance.now();
@@ -74,6 +77,198 @@ requestAnimationFrame(() => {
 
 function matchesMediaQuery(query) {
   return typeof window.matchMedia === "function" && window.matchMedia(query).matches;
+}
+
+function createResultsAtmosphere() {
+  const source = document.querySelector(".clock-atmosphere-field");
+  if (!source) return null;
+
+  const field = source.cloneNode(true);
+  const identifiers = new Map();
+  field.querySelectorAll("[id]").forEach((element) => {
+    const original = element.id;
+    element.id = `results-${original}`;
+    identifiers.set(original, element.id);
+  });
+  field.querySelectorAll("*").forEach((element) => {
+    Array.from(element.attributes).forEach((attribute) => {
+      let value = attribute.value;
+      identifiers.forEach((replacement, original) => {
+        value = value.replaceAll(`url(#${original})`, `url(#${replacement})`);
+      });
+      if (value !== attribute.value) element.setAttribute(attribute.name, value);
+    });
+  });
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "clock-results-backdrop";
+  backdrop.setAttribute("aria-hidden", "true");
+  const canvas = document.createElement("canvas");
+  canvas.className = "clock-results-particles";
+  backdrop.append(field, canvas);
+  document.body.prepend(backdrop);
+
+  function updateSceneSize() {
+    const stage = document.querySelector(".clock-flip-stage");
+    const size = stage.clientWidth;
+    if (!size || !backdrop.clientWidth || !backdrop.clientHeight) return;
+    backdrop.style.setProperty("--scene-size", `${size}px`);
+    backdrop.style.setProperty("--scene-x", backdrop.clientWidth / size);
+    backdrop.style.setProperty("--scene-y", backdrop.clientHeight / size);
+  }
+  new ResizeObserver(updateSceneSize).observe(backdrop);
+  updateSceneSize();
+
+  const aurora = field.querySelector(".clock-atmosphere-aurora");
+  return { field, aurora, canvas };
+}
+
+function syncAtmosphereTime(source, destination) {
+  const times = new Map(source.getAnimations({ subtree: true }).map((animation) => [
+    animation.animationName, animation.currentTime,
+  ]));
+  destination.getAnimations({ subtree: true }).forEach((animation) => {
+    const time = times.get(animation.animationName);
+    if (typeof time === "number") animation.currentTime = time;
+  });
+  destination.querySelector("svg").setCurrentTime(source.querySelector("svg").getCurrentTime());
+}
+
+function initClockAtmosphere() {
+  const canvas = document.querySelector(".clock-atmosphere-particles");
+  const context = canvas?.getContext("2d");
+  if (!context) return;
+
+  const aurora = document.querySelector(".clock-atmosphere-aurora");
+  const landingField = document.querySelector(".clock-atmosphere-field");
+  const resultsAtmosphere = createResultsAtmosphere();
+  const resultsContext = resultsAtmosphere?.canvas.getContext("2d");
+  let showingResults = false;
+  const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const particles = Array.from({ length: 180 }, () => ({
+    x: Math.random(),
+    y: Math.random(),
+    radius: 0.35 + Math.random() * 0.95,
+    opacity: 0.18 + Math.random() * 0.4,
+    speed: 0.15 + Math.random() * 0.25,
+    phase: Math.random() * Math.PI * 2,
+  }));
+  let width = 0;
+  let height = 0;
+  let circleRadius = 0;
+  let count = 0;
+  let resultsWidth = 0;
+  let resultsHeight = 0;
+  let resultsCount = 0;
+  let frame = null;
+  let lastTime = 0;
+  let time = 0;
+
+  function paintSurface(target, areaWidth, areaHeight, total, haloRadius = null) {
+    if (!areaWidth || !areaHeight) return;
+    target.clearRect(0, 0, areaWidth, areaHeight);
+    target.shadowColor = "rgba(235, 229, 251, 0.4)";
+    if (haloRadius === null) target.fillStyle = "rgb(235, 229, 251)";
+    for (let index = 0; index < total; index += 1) {
+      const particle = particles[index];
+      // Motes stay in their own space while the pendulum and background move.
+      const x = particle.x + Math.sin(time * particle.speed + particle.phase) * 0.016 +
+        Math.sin(time * 0.11 + particle.phase) * 0.009;
+      const y = particle.y + Math.cos(time * particle.speed * 0.7 + particle.phase) * 0.02;
+      const edge = haloRadius === null
+        ? Math.max(0, Math.min(1, x * 20, (1 - x) * 20, y * 20, (1 - y) * 20))
+        : Math.max(0, Math.min(1,
+          (0.98 - Math.hypot((x - 0.5) * 2, (y - 0.5) * 2)) / 0.18
+        ));
+      if (haloRadius !== null) {
+        const distance = Math.hypot((x - 0.5) * areaWidth, (y - 0.5) * areaHeight);
+        const halo = Math.max(0, Math.min(1, (distance - haloRadius + 18) / 36));
+        target.fillStyle = `rgb(${Math.round(235 - halo * 130)}, ${Math.round(229 - halo * 130)}, ${Math.round(251 - halo * 125)})`;
+      }
+      target.globalAlpha = particle.opacity * (0.75 + Math.sin(time * 0.45 + particle.phase) * 0.25) * edge;
+      target.shadowBlur = particle.radius > 1.1 ? 4 : 0;
+      target.beginPath();
+      target.arc(x * areaWidth, y * areaHeight, particle.radius, 0, Math.PI * 2);
+      target.fill();
+    }
+    target.globalAlpha = 1;
+    target.shadowBlur = 0;
+  }
+
+  function paint(delta = 0) {
+    time += delta;
+    if (showingResults && resultsContext) {
+      paintSurface(resultsContext, resultsWidth, resultsHeight, resultsCount);
+    } else {
+      paintSurface(context, width, height, count, circleRadius);
+    }
+  }
+
+  function animate(timestamp) {
+    if (!lastTime || timestamp - lastTime >= 1000 / 30) {
+      paint(lastTime ? Math.min((timestamp - lastTime) / 1000, 0.05) : 0);
+      lastTime = timestamp;
+    }
+    frame = requestAnimationFrame(animate);
+  }
+
+  function sync() {
+    const hasResults = document.body.classList.contains("has-results");
+    if (resultsAtmosphere && hasResults !== showingResults) {
+      syncAtmosphereTime(
+        hasResults ? landingField : resultsAtmosphere.field,
+        hasResults ? resultsAtmosphere.field : landingField
+      );
+      showingResults = hasResults;
+    }
+    const motionAllowed = !motionPreference.matches && !document.hidden;
+    if (resultsAtmosphere) {
+      if (hasResults && motionAllowed) resultsAtmosphere.aurora.unpauseAnimations();
+      else resultsAtmosphere.aurora.pauseAnimations();
+    }
+    const landingActive = motionAllowed && !hasResults &&
+      !["is-flipping", "is-flip-pending"].some((name) => document.body.classList.contains(name));
+    if (landingActive) aurora?.unpauseAnimations();
+    else aurora?.pauseAnimations();
+    const active = motionAllowed && (hasResults || landingActive);
+    if (active && frame === null) {
+      frame = requestAnimationFrame(animate);
+    } else if (!active) {
+      cancelAnimationFrame(frame);
+      frame = null;
+      lastTime = 0;
+      paint();
+    }
+  }
+
+  function resize() {
+    width = canvas.clientWidth;
+    height = canvas.clientHeight;
+    circleRadius = canvas.parentElement.clientWidth / 2;
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    context.setTransform(scale, 0, 0, scale, 0, 0);
+    count = Math.min(80, Math.max(36, Math.round(width * 0.14)));
+    if (resultsContext) {
+      resultsWidth = resultsAtmosphere.canvas.clientWidth;
+      resultsHeight = resultsAtmosphere.canvas.clientHeight;
+      resultsAtmosphere.canvas.width = Math.round(resultsWidth * scale);
+      resultsAtmosphere.canvas.height = Math.round(resultsHeight * scale);
+      resultsContext.setTransform(scale, 0, 0, scale, 0, 0);
+      resultsCount = Math.min(particles.length, Math.max(70, Math.round(resultsWidth * resultsHeight / 7000)));
+    }
+    paint();
+  }
+
+  const resizeObserver = new ResizeObserver(resize);
+  resizeObserver.observe(canvas);
+  if (resultsAtmosphere) resizeObserver.observe(resultsAtmosphere.canvas);
+  new MutationObserver(sync).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  document.addEventListener("visibilitychange", sync);
+  motionPreference.addEventListener("change", sync);
+  resize();
+  sync();
 }
 
 function shouldUseHoverNotableTooltips() {
@@ -132,6 +327,16 @@ const notableLifespansByWeek = new Map();
 const notableLifespanRequests = new Map();
 const notableAgeRequests = new Map();
 const failedNotableLifespanWeeks = new Set();
+const notableBatchQueue = [];
+let activeNotableBatches = 0;
+let notableEntityWorker = null;
+let notableWorkerUnavailable = false;
+let notableWorkerJobId = 0;
+const notableWorkerJobs = new Map();
+const notablePrefetchQueue = new Set();
+let activeNotablePrefetches = 0;
+let notableRowsObserver = null;
+let notablePrefetchEnabled = false;
 
 function getEffectiveDobValue(value) {
   const trimmed = value ? value.trim() : "";
@@ -276,33 +481,6 @@ function syncDobValue() {
   hideDobError();
 }
 
-function updateResultHeadings() {
-  if (lifeCalendarHeading) {
-    lifeCalendarHeading.textContent = "My life map";
-  }
-}
-
-function getCssVar(name, fallback) {
-  const root = document.documentElement;
-  const value = getComputedStyle(root).getPropertyValue(name);
-  return value ? value.trim() : fallback;
-}
-
-function hexToRgba(hex, alpha) {
-  const normalized = hex.replace("#", "");
-  if (normalized.length !== 6) return hex;
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function drawCanvasBackground(ctx, width, height) {
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = getCssVar("--page-bg", "#f7f5ef");
-  ctx.fillRect(0, 0, width, height);
-}
-
 function formatClockReadoutText(hours, minutes, dayOffset) {
   const dayLabel = dayOffset > 0 ? `Day ${dayOffset + 1}, ` : "";
   const hh = hours.toString().padStart(2, "0");
@@ -396,15 +574,7 @@ function updateClock(ratio, options = {}) {
   clockPanel.hidden = false;
   clockPanel.classList.add("is-visible");
 
-  lastClockState = {
-    heading: "The Life Clock",
-    readout,
-    hourAngle: visualState.hourAngle,
-    minuteAngle: visualState.minuteAngle,
-    hours: visualState.hours,
-    minutes: visualState.minutes,
-  };
-  lastClockRatio = ratio;
+  lastClockState = { readout };
 }
 
 function prefersReducedMotion() {
@@ -428,7 +598,8 @@ function applyFlipFormShell(enableResults) {
   window.clearTimeout(flipSettleTimer);
   window.clearTimeout(clockMotionTimer);
   if (enableResults) {
-    window.scrollTo(0, 0);
+    document.body.scrollTo(0, 0);
+    document.body.focus({ preventScroll: true });
   }
   document.body.classList.remove("is-flip-pending");
   document.body.classList.toggle("is-flipping", enableResults);
@@ -439,6 +610,8 @@ function applyFlipFormShell(enableResults) {
     }, 1050);
     flipSettleTimer = window.setTimeout(() => {
       document.body.classList.remove("is-flipping");
+      // Measure after the map enters layout and page scrolling is restored.
+      updateLifeGrid(lastDobDate);
     }, 1700);
   } else {
     document.body.classList.remove("is-flipping");
@@ -450,30 +623,25 @@ function applyFlipFormShell(enableResults) {
 
 function flipFormShell(enableResults) {
   window.clearTimeout(flipStartTimer);
-
   if (!enableResults) {
     document.body.classList.remove("is-flip-pending");
     applyFlipFormShell(false);
     return;
   }
-
-  const currentlyHasResults = document.body.classList.contains("has-results");
-  if (currentlyHasResults) return;
-
+  if (document.body.classList.contains("has-results")) return;
   document.body.classList.add("is-flip-pending");
   const delay = delayUntilPendulumCenter();
   if (delay === 0) {
     applyFlipFormShell(true);
     return;
   }
-
   flipStartTimer = window.setTimeout(() => {
     applyFlipFormShell(true);
   }, delay);
 }
 
 function buildLifeBoxes(totalYears) {
-  if (totalYears === currentYearsDisplayed) return;
+  if (totalYears === currentYearsDisplayed) return false;
   lifeBoxes.innerHTML = "";
   const container = document.createDocumentFragment();
   for (let year = 1; year <= totalYears; year++) {
@@ -486,18 +654,12 @@ function buildLifeBoxes(totalYears) {
       if (year > 1 && (year - 1) % 10 === 0) {
         box.classList.add("decade-start");
       }
-      const bandIndex = Math.floor((weekNumber - 1) / 10);
-      if (bandIndex % 2 === 1) {
-        box.classList.add("band-alt");
-      }
       container.appendChild(box);
     }
   }
   lifeBoxes.appendChild(container);
   currentYearsDisplayed = totalYears;
-  notableLifespansByWeek.forEach((people, globalWeek) => {
-    markLoadedNotableWeek(globalWeek, people);
-  });
+  return true;
 }
 
 function observeLifeMapFill() {
@@ -525,7 +687,8 @@ function observeLifeMapFill() {
   lifeMapFillObserver.observe(lifeGrid);
 }
 
-function updateLifeGrid(ageYears, dobDate) {
+function updateLifeGrid(dobDate) {
+  const wasHidden = lifeGrid.hidden;
   const weeksLived = weeksLivedFromDob(dobDate);
   const daysLived = daysLivedFromDob(dobDate);
   const agePosition = getAgePosition(dobDate, today);
@@ -541,86 +704,45 @@ function updateLifeGrid(ageYears, dobDate) {
     ),
     MAX_YEARS_DISPLAYED
   );
-  buildLifeBoxes(desiredYears);
-  const showBeyond = agePosition.displayedWeeks > expectancyWeeks;
-  const { boxSize, boxGap } = updateLifeBoxScale();
-  const cellSize = boxSize + boxGap;
-  const filledRows = Math.max(
-    1,
-    Math.ceil(agePosition.displayedWeeks / WEEKS_PER_YEAR)
-  );
-  const gradientHeight = filledRows * cellSize - boxGap;
-  lifeGrid.classList.remove("is-fill-animated");
-
-  Array.from(lifeBoxes.children).forEach((box, index) => {
-    const rowIndex = Math.floor(index / WEEKS_PER_YEAR);
-    const columnIndex = index % WEEKS_PER_YEAR;
-    const globalWeekIndex = index + 1;
-    box.hidden = false;
-    box.style.removeProperty("--filled-grad-height");
-    box.style.removeProperty("--filled-grad-offset");
-    box.style.removeProperty("--life-fill-delay");
-    box.classList.remove("filled", "beyond", "is-current-week");
-    box.classList.add("upcoming");
-    if (globalWeekIndex <= agePosition.displayedWeeks) {
-      box.classList.remove("upcoming");
-      box.classList.add("filled");
-      box.style.setProperty(
-        "--life-fill-delay",
-        `${Math.min(1200, rowIndex * 18 + columnIndex * 3)}ms`
-      );
-      box.style.setProperty("--filled-grad-height", `${gradientHeight}px`);
-      box.style.setProperty(
-        "--filled-grad-offset",
-        `${-rowIndex * cellSize}px`
-      );
-      if (globalWeekIndex === agePosition.displayedWeeks) {
-        box.classList.add("is-current-week");
-      }
-    } else if (globalWeekIndex > expectancyWeeks) {
-      if (!showBeyond) {
-        box.hidden = true;
-        return;
-      }
-      box.classList.remove("upcoming");
-      box.classList.add("beyond");
-    }
-  });
+  const rebuilt = buildLifeBoxes(desiredYears);
+  const nextWeeks = Math.min(agePosition.displayedWeeks, lifeBoxes.children.length);
+  const previousWeeks = Math.min(lastGridStats?.displayedWeeks || 0, lifeBoxes.children.length);
+  const changed = rebuilt || nextWeeks !== previousWeeks;
   lifeGrid.hidden = false;
+  updateLifeBoxScale();
+
+  if (changed) {
+    unpinWeekTooltip();
+    // Touch only cells whose lived/future state changed.
+    const start = rebuilt ? 0 : Math.min(previousWeeks, nextWeeks);
+    const end = rebuilt ? lifeBoxes.children.length : Math.max(previousWeeks, nextWeeks);
+    for (let index = start; index < end; index += 1) {
+      const box = lifeBoxes.children[index];
+      const state = index < nextWeeks ? "filled" : index < expectancyWeeks ? "upcoming" : "beyond";
+      if (!box.classList.contains(state)) {
+        box.classList.remove("filled", "upcoming", "beyond");
+        box.classList.add(state);
+      }
+    }
+  }
   lifeGrid.classList.add("is-visible");
   if (weeksLivedHeading) {
     weeksLivedHeading.textContent = `${weeksLived.toLocaleString()} weeks lived (${daysLived.toLocaleString()} days)`;
   }
-  updateResultHeadings();
-  lastGridStats = {
-    weeksLived,
-    daysLived,
-    displayAgeYears: agePosition.ageYears,
-    displayAgeWeek: agePosition.ageWeek,
-    displayedWeeks: agePosition.displayedWeeks,
-    expectancyWeeks,
-    expectancyYears: expectancyYearsCapped,
-    showBeyond,
-    totalYears: desiredYears,
-    title: lifeCalendarHeading
-      ? lifeCalendarHeading.textContent
-      : "My life map",
-  };
-  observeLifeMapFill();
+  lastGridStats = { weeksLived, displayedWeeks: agePosition.displayedWeeks };
+  if (changed || wasHidden) {
+    lifeGrid.classList.remove("is-fill-animated");
+    observeLifeMapFill();
+    // Restore prefetched dots after creating cells or changing the lived range.
+    markLoadedNotableWeeks(notableLifespansByWeek);
+    observeNotableRows();
+  }
   prefetchNotableLifespansForAge(agePosition.ageYears);
-  // Intentionally skip print-specific scaling to avoid overriding UI sizing.
+  scheduleLifeGlassCutouts();
 }
 
 function updateLifeBoxScale() {
-  if (!lifeBoxes) {
-    return { boxSize: BASE_LIFE_BOX_SIZE, boxGap: BASE_LIFE_BOX_GAP };
-  }
-  const container =
-    lifeBoxes.closest(".life-grid-inner") || lifeBoxes.parentElement;
-  if (!container) {
-    return { boxSize: BASE_LIFE_BOX_SIZE, boxGap: BASE_LIFE_BOX_GAP };
-  }
-  const availableWidth = container.clientWidth;
+  const availableWidth = lifeGridInner.clientWidth;
   const baseGridWidth =
     WEEKS_PER_YEAR * (BASE_LIFE_BOX_SIZE + BASE_LIFE_BOX_GAP) -
     BASE_LIFE_BOX_GAP;
@@ -655,568 +777,110 @@ function updateLifeBoxScale() {
   if (lifeGrid) {
     lifeGrid.style.setProperty("--life-grid-width", `${gridWidth}px`);
   }
-  return { boxSize, boxGap };
+  scheduleLifeGlassCutouts();
+}
+
+function scheduleLifeGlassCutouts() {
+  if (lifeGlassCutoutFrame !== null) return;
+  lifeGlassCutoutFrame = requestAnimationFrame(updateLifeGlassCutouts);
+}
+
+function updateLifeGlassCutouts() {
+  lifeGlassCutoutFrame = null;
+  if (!lifeGridGlass || !lifeBoxes || lifeGrid.hidden || printMedia.matches) return;
+  const filledCount = Math.min(getLivedGlobalWeekLimit(), lifeBoxes.children.length);
+  const firstFilled = filledCount ? lifeBoxes.firstElementChild : null;
+  const width = lifeGrid.clientWidth;
+  const height = lifeGrid.clientHeight;
+  if (!firstFilled || !width || !height) {
+    lifeGlassMaskRevision += 1;
+    lifeGridGlass.style.removeProperty("mask-image");
+    if (lifeGlassMaskUrl) URL.revokeObjectURL(lifeGlassMaskUrl);
+    lifeGlassMaskUrl = null;
+    lifeGlassGeometry = null;
+    return;
+  }
+
+  const panelRect = lifeGrid.getBoundingClientRect();
+  const boxesRect = lifeBoxes.getBoundingClientRect();
+  const gridStyle = getComputedStyle(lifeBoxes);
+  const cellStyle = getComputedStyle(firstFilled);
+  const size = parseFloat(cellStyle.width);
+  const columnGap = parseFloat(gridStyle.columnGap) || 0;
+  const rowGap = parseFloat(gridStyle.rowGap) || 0;
+  const radius = Math.min(parseFloat(cellStyle.borderTopLeftRadius) || 0, size / 2);
+  const decadeStart = lifeBoxes.querySelector(".decade-start");
+  const decadeGap = decadeStart ? parseFloat(getComputedStyle(decadeStart).marginTop) || 0 : 0;
+  const left = boxesRect.left - panelRect.left - lifeGrid.clientLeft;
+  const top = boxesRect.top - panelRect.top - lifeGrid.clientTop;
+  const n = (value) => Math.round(value * 1000) / 1000;
+  const scale = Math.min(window.devicePixelRatio || 1, 2);
+  const geometry = [width, height, left, top, size, columnGap, rowGap, radius, decadeGap, filledCount, scale]
+    .map(n).join("|");
+  if (geometry === lifeGlassGeometry) return;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(width * scale);
+  canvas.height = Math.ceil(height * scale);
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.scale(scale, scale);
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, width, height);
+  context.globalCompositeOperation = "destination-out";
+  context.beginPath();
+  // Rasterize once: a cached alpha mask avoids a complex live backdrop clip.
+  for (let index = 0; index < filledCount; index += 1) {
+    const row = Math.floor(index / WEEKS_PER_YEAR);
+    const column = index % WEEKS_PER_YEAR;
+    const x = left + column * (size + columnGap);
+    const y = top + row * (size + rowGap) + Math.floor(row / 10) * decadeGap;
+    context.roundRect(x, y, size, size, radius);
+  }
+  context.fill();
+  lifeGlassGeometry = geometry;
+  const revision = ++lifeGlassMaskRevision;
+  canvas.toBlob(async (blob) => {
+    if (revision !== lifeGlassMaskRevision) return;
+    if (!blob) {
+      lifeGlassGeometry = null;
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const mask = new Image();
+    mask.src = url;
+    try {
+      await mask.decode();
+    } catch {
+      URL.revokeObjectURL(url);
+      if (revision === lifeGlassMaskRevision) lifeGlassGeometry = null;
+      return;
+    }
+    if (revision !== lifeGlassMaskRevision) {
+      URL.revokeObjectURL(url);
+      return;
+    }
+    lifeGridGlass.style.maskImage = `url("${url}")`;
+    if (lifeGlassMaskUrl) URL.revokeObjectURL(lifeGlassMaskUrl);
+    lifeGlassMaskUrl = url;
+  });
+}
+
+if (lifeGrid && typeof ResizeObserver === "function") {
+  new ResizeObserver(scheduleLifeGlassCutouts).observe(lifeGrid);
+}
+
+function cancelNotableHover() {
+  if (notableHoverTimer !== null) {
+    clearTimeout(notableHoverTimer);
+    notableHoverTimer = null;
+  }
 }
 
 function hideTooltip() {
+  cancelNotableHover();
   if (weekTooltip) {
     weekTooltip.hidden = true;
   }
-}
-
-function createBaseCanvas() {
-  const width = 1080;
-  const height = 1920;
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  return { canvas, ctx: canvas.getContext("2d"), width, height };
-}
-
-function loadClockFaceImage() {
-  if (!clockFaceImagePromise) {
-    clockFaceImagePromise = new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
-      img.src = "assets/clockbase.svg";
-    });
-  }
-  return clockFaceImagePromise;
-}
-
-function drawRoundedRect(ctx, x, y, w, h, r) {
-  const radius = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + w - radius, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-  ctx.lineTo(x + w, y + h - radius);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-  ctx.lineTo(x + radius, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-  ctx.lineTo(x, y + radius);
-  ctx.quadraticCurveTo(x, y, x + radius, y);
-  ctx.closePath();
-}
-
-function drawTextWithSpacing(
-  ctx,
-  text,
-  x,
-  y,
-  letterSpacingEm,
-  fontSize,
-  align = "left"
-) {
-  if (!text) return;
-  const spacing = letterSpacingEm * fontSize;
-  const glyphs = Array.from(text);
-  const widths = glyphs.map((glyph) => ctx.measureText(glyph).width);
-  const totalWidth =
-    widths.reduce((sum, width) => sum + width, 0) +
-    Math.max(0, glyphs.length - 1) * spacing;
-
-  let startX = x;
-  if (align === "center") {
-    startX = x - totalWidth / 2;
-  } else if (align === "right") {
-    startX = x - totalWidth;
-  }
-
-  ctx.save();
-  const previousAlign = ctx.textAlign;
-  ctx.textAlign = "left";
-  let cursorX = startX;
-  glyphs.forEach((glyph, index) => {
-    ctx.fillText(glyph, cursorX, y);
-    cursorX += widths[index] + spacing;
-  });
-  ctx.textAlign = previousAlign;
-  ctx.restore();
-}
-
-function measureTextWithSpacing(ctx, text, letterSpacingEm, fontSize) {
-  if (!text) return 0;
-  const spacing = letterSpacingEm * fontSize;
-  const glyphs = Array.from(text);
-  const widths = glyphs.map((glyph) => ctx.measureText(glyph).width);
-  return (
-    widths.reduce((sum, width) => sum + width, 0) +
-    Math.max(0, glyphs.length - 1) * spacing
-  );
-}
-
-function drawClockHand(ctx, cx, cy, angleDeg, length, width, color, fillColor) {
-  const headInset = Math.max(10, Math.round(width * 0.8));
-  const tipWidth = Math.max(4, Math.round(width * 0.22));
-  const shoulderWidth = Math.max(6, Math.round(width * 0.9));
-  const shoulderInset = width - shoulderWidth;
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate((angleDeg * Math.PI) / 180);
-  ctx.translate(-width / 2, 0);
-
-  const topY = -length;
-  ctx.beginPath();
-  ctx.moveTo((width - tipWidth) / 2, topY);
-  ctx.lineTo((width + tipWidth) / 2, topY);
-  ctx.lineTo(shoulderWidth, topY + headInset);
-  ctx.lineTo(shoulderWidth, 0);
-  ctx.lineTo(shoulderInset, 0);
-  ctx.lineTo(shoulderInset, topY + headInset);
-  ctx.closePath();
-
-  ctx.fillStyle = color;
-  ctx.fill();
-
-  if (fillColor) {
-    const inset = Math.max(2, Math.round(width * 0.34));
-    const topStart = Math.min(length - 6, Math.max(8, Math.round(width)));
-    const topEnd = Math.min(length - 2, Math.max(24, Math.round(width * 3)));
-
-    ctx.beginPath();
-    ctx.moveTo(inset, -length + topStart);
-    ctx.lineTo(width - inset, -length + topStart);
-    ctx.lineTo(width - inset, -length + topEnd);
-    ctx.lineTo(inset, -length + topEnd);
-    ctx.closePath();
-    ctx.fillStyle = fillColor;
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function drawDayNightIndicator(ctx, cx, cy, faceSize, hours, minutes) {
-  if (typeof hours !== "number" || typeof minutes !== "number") return;
-  const indicatorSize = faceSize * (130 / 400);
-  const offsetY = faceSize * (100 / 400);
-  const centerX = cx;
-  const centerY = cy + offsetY;
-  const radius = indicatorSize / 2;
-
-  const angle = ((hours + minutes / 60) / 24) * 360 - 180;
-  const segments = 120;
-  const colors = [
-    "#0b1426",
-    "#143057",
-    "#50bdec",
-    "#8bdcff",
-    "#50bdec",
-    "#143057",
-    "#0b1426",
-  ];
-  const colorStops = [0, 60, 150, 180, 210, 300, 360];
-
-  ctx.save();
-  ctx.translate(centerX, centerY);
-  ctx.rotate((angle * Math.PI) / 180);
-
-  const sweepRad = (150 * Math.PI) / 180;
-  const arcInset = (Math.PI - sweepRad) / 2;
-  const startAngle = Math.PI - arcInset;
-  const endAngle = arcInset;
-  ctx.beginPath();
-  ctx.arc(0, 0, radius, startAngle, endAngle, false);
-  ctx.closePath();
-  ctx.clip();
-
-  for (let i = 0; i < segments; i++) {
-    const startDeg = (i / segments) * 360;
-    const endDeg = ((i + 1) / segments) * 360;
-    let color = colors[colors.length - 1];
-    for (let j = 0; j < colorStops.length - 1; j++) {
-      if (startDeg >= colorStops[j] && startDeg < colorStops[j + 1]) {
-        color = colors[j];
-        break;
-      }
-    }
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.fillStyle = color;
-    ctx.arc(
-      0,
-      0,
-      radius,
-      (startDeg * Math.PI) / 180,
-      (endDeg * Math.PI) / 180,
-      false
-    );
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  ctx.fillStyle = "rgba(255, 199, 0, 0.7)";
-  const stars = [
-    { x: -radius * 0.42, y: -radius * 0.28, r: 1.6 },
-    { x: -radius * 0.22, y: -radius * 0.42, r: 1.2 },
-    { x: -radius * 0.12, y: -radius * 0.18, r: 1 },
-    { x: -radius * 0.3, y: -radius * 0.12, r: 0.8 },
-  ];
-  stars.forEach((star) => {
-    ctx.beginPath();
-    ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2);
-    ctx.fill();
-  });
-
-  const emojiFont = `${Math.round(
-    radius * 0.38
-  )}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-  ctx.font = emojiFont;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-  ctx.save();
-  ctx.rotate((90 * Math.PI) / 180);
-  ctx.fillText("🌞", radius * 0.45, 0);
-  ctx.restore();
-
-  ctx.save();
-  ctx.rotate((-90 * Math.PI) / 180);
-  ctx.fillText("🌜", -radius * 0.45, 0);
-  ctx.restore();
-
-  ctx.font = `${Math.round(
-    radius * 0.26
-  )}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-  ctx.fillText("☁️", 0, -radius * 0.42);
-  ctx.fillText("☁️", 0, -radius * 0.1);
-
-  ctx.restore();
-
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, radius * 0.16, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-async function buildClockShareCanvas(state) {
-  if (!state) return null;
-  const { canvas, ctx, width, height } = createBaseCanvas();
-  const accent = getCssVar("--accent", "#33cc99");
-  const accent2 = getCssVar("--accent-2", "#f97316");
-  const text = getCssVar("--text", "#0f172a");
-  drawCanvasBackground(ctx, width, height, 0.5);
-
-  const headingX = width / 2;
-  const headingY = 320;
-  const headingLine1 = "My life";
-  const headingLine2 = "time is";
-
-  ctx.fillStyle = text;
-  ctx.textAlign = "center";
-  const headingFontSize = 200;
-  const headingLetterSpacing = -0.02;
-  const lineHeight = 200;
-  ctx.font = `600 ${headingFontSize}px ${CANVAS_FONT_FAMILY}`;
-  drawTextWithSpacing(
-    ctx,
-    headingLine1.trim(),
-    headingX,
-    headingY,
-    headingLetterSpacing,
-    headingFontSize,
-    "center"
-  );
-  let readoutY = headingY + lineHeight;
-  if (headingLine2) {
-    drawTextWithSpacing(
-      ctx,
-      headingLine2.trim(),
-      headingX,
-      headingY + lineHeight,
-      headingLetterSpacing,
-      headingFontSize,
-      "center"
-    );
-    readoutY = headingY + lineHeight * 2;
-  }
-  readoutY += 10;
-
-  const readoutFontSize = 140;
-  const readoutText = state.readout || "--:--";
-  const hasReadoutPeriod = /\s(AM|PM)$/.test(readoutText);
-  const readoutPaddingX = hasReadoutPeriod ? -90 : -30;
-  const readoutPaddingTop = 10;
-  const readoutPaddingBottom = 50;
-  const readoutMetrics = ctx.measureText(readoutText);
-  const readoutAscent =
-    readoutMetrics.actualBoundingBoxAscent || readoutFontSize * 0.8;
-  const readoutDescent =
-    readoutMetrics.actualBoundingBoxDescent || readoutFontSize * 0.2;
-  const readoutHeight = readoutAscent + readoutDescent;
-  const readoutWidth = readoutMetrics.width;
-  const readoutPillX = headingX - readoutWidth / 2 - readoutPaddingX;
-  const readoutPillY = readoutY - readoutAscent - readoutPaddingTop;
-  const readoutPillW = readoutWidth + readoutPaddingX * 2;
-  const readoutPillH = readoutHeight + readoutPaddingTop + readoutPaddingBottom;
-
-  ctx.fillStyle = text;
-  drawRoundedRect(
-    ctx,
-    readoutPillX,
-    readoutPillY,
-    readoutPillW,
-    readoutPillH,
-    28
-  );
-  ctx.fill();
-
-  ctx.fillStyle = getCssVar("--white", "#ffffff");
-  ctx.font = `500 ${readoutFontSize}px ${CANVAS_FONT_FAMILY}`;
-  ctx.fillText(readoutText, headingX, readoutY);
-  ctx.textAlign = "start";
-
-  const cx = width / 2;
-  const cy = height / 2 + 340;
-  const radius = 420;
-
-  const faceSize = radius * 2;
-  try {
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.fill();
-    const faceImg = await loadClockFaceImage();
-    ctx.drawImage(
-      faceImg,
-      cx - faceSize / 2,
-      cy - faceSize / 2,
-      faceSize,
-      faceSize
-    );
-  } catch (err) {
-    console.warn("Clock face image failed to load, using fallback:", err);
-  }
-  // drawDayNightIndicator(ctx, cx, cy, faceSize, state.hours, state.minutes);
-
-  // Redraw hands on top of face
-  const hourLength = radius * 0.5;
-  const minuteLength = radius * 0.8;
-  const handWidth = 24;
-  const handFill = getCssVar("--accent-4", "#f26d7d");
-  drawClockHand(
-    ctx,
-    cx,
-    cy,
-    state.hourAngle,
-    hourLength,
-    handWidth,
-    text,
-    handFill
-  );
-  drawClockHand(
-    ctx,
-    cx,
-    cy,
-    state.minuteAngle,
-    minuteLength,
-    handWidth,
-    text,
-    handFill
-  );
-
-  ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = text;
-  ctx.beginPath();
-  ctx.arc(cx, cy, 18, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.lineWidth = 5;
-  ctx.stroke();
-
-  ctx.fillStyle = text;
-  ctx.textAlign = "left";
-  ctx.font = `500 55px ${CANVAS_FONT_FAMILY}`;
-  const signatureUrl = "raetast.com/clock";
-  const signatureTag = "#thelifeclock";
-  ctx.fillText(signatureUrl, 60, height - 80);
-  ctx.textAlign = "right";
-  ctx.fillText(signatureTag, width - 60, height - 80);
-  ctx.textAlign = "start";
-
-  return canvas;
-}
-
-function buildGridShareCanvas(stats) {
-  if (!stats) return null;
-  const { canvas, ctx, width, height } = createBaseCanvas();
-  const text = getCssVar("--text", "#0f172a");
-  const mutedRgb = getCssVar("--muted-rgb", "164, 172, 182");
-  const textRgb = getCssVar("--text-rgb", "15, 23, 42");
-  const filledStart = getCssVar("--filled-grad-start", "#ffc8c8");
-  const filledEnd = getCssVar("--filled-grad-end", "#0c59c4");
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, height);
-
-  const titleText = "My life map";
-
-  ctx.fillStyle = text;
-  const titleFontSize = 130;
-  const titleLetterSpacing = -0.02;
-  ctx.font = `600 ${titleFontSize}px ${CANVAS_FONT_FAMILY}`;
-  const titleWidth = measureTextWithSpacing(
-    ctx,
-    titleText,
-    titleLetterSpacing,
-    titleFontSize
-  );
-  const contentTop = 20;
-  const targetGridWidth = Math.min(width - 120, titleWidth);
-  const gridTop = contentTop + 300;
-  const baseSize = 14;
-  const baseGap = 2;
-  const availableHeight = height - gridTop - 100;
-  const rowHeight = baseSize + baseGap;
-  const baseGridWidth = WEEKS_PER_YEAR * (baseSize + baseGap) - baseGap;
-  const decadeGap = 4;
-  const decadeCount = Math.floor((stats.totalYears - 1) / 10);
-  const availableHeightForRows = availableHeight - decadeCount * decadeGap;
-  const scaleFromHeight =
-    availableHeightForRows / (stats.totalYears * rowHeight);
-  const scaleFromWidth = targetGridWidth / baseGridWidth;
-  const scale = Math.min(1.4, scaleFromHeight, scaleFromWidth);
-  const box = Math.max(8, baseSize * scale);
-  const gap = baseGap * scale;
-  const gridWidth = WEEKS_PER_YEAR * (box + gap) - gap;
-  const startX = (width - gridWidth) / 2;
-  const startY = gridTop;
-  const gridHeight =
-    stats.totalYears * (box + gap) - gap + decadeCount * decadeGap;
-  const filledGradient = ctx.createLinearGradient(
-    0,
-    startY,
-    0,
-    startY + gridHeight
-  );
-  filledGradient.addColorStop(0, filledStart);
-  filledGradient.addColorStop(1, filledEnd);
-  const upcomingStroke = `rgba(${mutedRgb}, 0.5)`;
-  const beyondStroke = `rgba(${textRgb}, 0.15)`;
-  ctx.lineWidth = 1;
-  drawTextWithSpacing(
-    ctx,
-    titleText,
-    width / 2,
-    contentTop + 160,
-    titleLetterSpacing,
-    titleFontSize,
-    "center"
-  );
-
-  ctx.fillStyle = text;
-  const statsFontSize = 55;
-  const statsLetterSpacing = -0.02;
-  ctx.font = `500 ${statsFontSize}px ${CANVAS_FONT_FAMILY}`;
-  const statsY = contentTop + 240;
-  drawTextWithSpacing(
-    ctx,
-    `${stats.weeksLived.toLocaleString()} weeks lived (${stats.daysLived.toLocaleString()} days)`,
-    startX,
-    statsY,
-    statsLetterSpacing,
-    statsFontSize,
-    "left"
-  );
-
-  for (let year = 0; year < stats.totalYears; year++) {
-    for (let week = 0; week < WEEKS_PER_YEAR; week++) {
-      const globalWeek = year * WEEKS_PER_YEAR + week + 1;
-      if (!stats.showBeyond && globalWeek > stats.expectancyWeeks) continue;
-      const decadeOffset = Math.floor(year / 10) * decadeGap;
-      const y = startY + year * (box + gap) + decadeOffset;
-      const x = startX + week * (box + gap);
-      if (globalWeek <= stats.weeksLived) {
-        ctx.fillStyle = filledGradient;
-        ctx.fillRect(x, y, box, box);
-      } else if (globalWeek > stats.expectancyWeeks) {
-        ctx.strokeStyle = beyondStroke;
-        ctx.strokeRect(x, y, box, box);
-      } else {
-        ctx.strokeStyle = upcomingStroke;
-        ctx.strokeRect(x, y, box, box);
-      }
-    }
-  }
-
-  ctx.fillStyle = text;
-  ctx.font = `500 55px ${CANVAS_FONT_FAMILY}`;
-  const signatureUrl = "raetast.com/clock";
-  const signatureTag = "#thelifeclock";
-  ctx.textAlign = "left";
-  ctx.fillText(signatureUrl, 60, height - 80);
-  ctx.textAlign = "right";
-  ctx.fillText(signatureTag, width - 60, height - 80);
-  ctx.textAlign = "start";
-
-  return canvas;
-}
-
-async function saveImageFromCanvas(canvas, filename, text) {
-  return new Promise((resolve) => {
-    canvas.toBlob(async (blob) => {
-      if (!blob) {
-        resolve("failed");
-        return;
-      }
-      if (window.showSaveFilePicker) {
-        await saveBlob(blob, filename, "image/png");
-        resolve("picker");
-        return;
-      }
-      const file = new File([blob], filename, { type: "image/png" });
-      const payload = {
-        files: [file],
-        title: "Life snapshot",
-        text: text || "My life snapshot",
-      };
-      if (navigator.share && navigator.canShare && navigator.canShare(payload)) {
-        try {
-          await navigator.share(payload);
-          resolve("shared");
-          return;
-        } catch (err) {
-          resolve("cancelled");
-          return;
-        }
-      }
-      await saveBlob(blob, filename, "image/png");
-      resolve("downloaded");
-    });
-  });
-}
-
-async function shareCanvas(canvas, filename, button, text) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(async (blob) => {
-      if (!blob) {
-        reject(new Error("Failed to create image"));
-        return;
-      }
-      const file = new File([blob], filename, { type: "image/png" });
-      const payload = {
-        files: [file],
-        title: "Life snapshot",
-        text: text || "My life snapshot",
-      };
-
-      try {
-        if (!navigator.share || !navigator.canShare || !navigator.canShare(payload)) {
-          resolve("unsupported");
-          return;
-        }
-        await navigator.share(payload);
-        resolve("shared");
-      } catch (err) {
-        resolve("cancelled");
-      } finally {
-        if (button) {
-          button.disabled = false;
-          button.classList.remove("loading");
-        }
-      }
-    });
-  });
 }
 
 let pinnedTooltipBox = null;
@@ -1277,6 +941,7 @@ function getEnwikiUrl(entity) {
 }
 
 function getSitelinkCount(entity) {
+  if (Number.isFinite(entity?.sitelinkCount)) return entity.sitelinkCount;
   return entity && entity.sitelinks
     ? Object.keys(entity.sitelinks).length
     : 0;
@@ -1470,6 +1135,56 @@ async function fetchCommonsAgeCategoryPage(ageYears, continueToken) {
   };
 }
 
+function getNotableEntityWorker() {
+  if (notableWorkerUnavailable) return null;
+  if (notableEntityWorker) return notableEntityWorker;
+  try {
+    notableEntityWorker = new Worker("js/notables-worker.js?v=1", { name: "life-clock-notables" });
+    notableEntityWorker.onmessage = ({ data }) => {
+      const job = notableWorkerJobs.get(data.id);
+      if (!job) return;
+      notableWorkerJobs.delete(data.id);
+      if (data.error) job.reject(new Error(data.error));
+      else job.resolve(data.entities);
+    };
+    notableEntityWorker.onerror = (event) => {
+      event.preventDefault();
+      notableWorkerUnavailable = true;
+      notableEntityWorker.terminate();
+      notableEntityWorker = null;
+      notableWorkerJobs.forEach((job) => job.reject(new Error("Entity worker unavailable")));
+      notableWorkerJobs.clear();
+    };
+  } catch {
+    notableWorkerUnavailable = true;
+    return null;
+  }
+  return notableEntityWorker;
+}
+
+async function parseWikidataEntities(json) {
+  const worker = getNotableEntityWorker();
+  if (worker) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const id = ++notableWorkerJobId;
+        notableWorkerJobs.set(id, { resolve, reject });
+        try {
+          worker.postMessage({ id, json });
+        } catch (error) {
+          notableWorkerJobs.delete(id);
+          reject(error);
+        }
+      });
+    } catch (error) {
+      if (!notableWorkerUnavailable) throw error;
+    }
+  }
+  // Keep local file previews and browsers without workers functional.
+  const data = JSON.parse(json);
+  return Object.values(data?.entities || {}).filter((entity) => entity && !entity.missing);
+}
+
 async function fetchWikidataEntities(ids) {
   if (!ids.length) return [];
   const params = new URLSearchParams({
@@ -1484,9 +1199,7 @@ async function fetchWikidataEntities(ids) {
   if (!response.ok) {
     throw new Error(`Wikidata entities request failed: ${response.status}`);
   }
-  const data = await response.json();
-  const entities = data && data.entities ? data.entities : {};
-  return Object.values(entities).filter((entity) => !entity.missing);
+  return parseWikidataEntities(await response.text());
 }
 
 function chunkItems(items, size) {
@@ -1497,20 +1210,52 @@ function chunkItems(items, size) {
   return chunks;
 }
 
-async function addNotableIdsToWeeks(ids, peopleByWeek, seenIds) {
+function drainNotableBatches() {
+  while (activeNotableBatches < NOTABLE_BATCH_CONCURRENCY && notableBatchQueue.length) {
+    const focusedBox = pinnedTooltipBox || hoveredWeekBox;
+    const focusedAge = focusedBox ? getBoxAgeYears(focusedBox) : null;
+    const priorityIndex = notableBatchQueue.findIndex((job) => job.ageYears === focusedAge);
+    const [job] = notableBatchQueue.splice(priorityIndex < 0 ? 0 : priorityIndex, 1);
+    activeNotableBatches += 1;
+    Promise.resolve().then(job.load).then(job.resolve, job.reject).finally(() => {
+      activeNotableBatches -= 1;
+      drainNotableBatches();
+    });
+  }
+}
+
+function enqueueNotableBatch(ageYears, load) {
+  return new Promise((resolve, reject) => {
+    notableBatchQueue.push({ ageYears, load, resolve, reject });
+    drainNotableBatches();
+  });
+}
+
+function yieldNotableWork() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function addNotableIdsToWeeks(ids, peopleByWeek, seenIds, ageYears) {
   const newIds = ids.filter((id) => {
     if (!id || seenIds.has(id)) return false;
     seenIds.add(id);
     return true;
   });
   const idBatches = chunkItems(newIds, WIKIDATA_ENTITY_BATCH_SIZE);
-  const entityArrays = await Promise.all(
-    idBatches.map((batch) => fetchWikidataEntities(batch))
-  );
-  entityArrays
-    .flat()
-    .map(normalizeWikidataEntity)
-    .forEach((person) => mergePeopleByWeek(peopleByWeek, person));
+  await Promise.all(idBatches.map((batch) => enqueueNotableBatch(ageYears, async () => {
+    const entities = await fetchWikidataEntities(batch);
+    let sliceStarted = performance.now();
+    for (const entity of entities) {
+      mergePeopleByWeek(peopleByWeek, normalizeWikidataEntity(entity));
+      if (performance.now() - sliceStarted >= NOTABLE_WORK_BUDGET_MS) {
+        await yieldNotableWork();
+        sliceStarted = performance.now();
+      }
+    }
+    publishNotablePeople(peopleByWeek);
+    // Let pointer events and rendering run before the next response is processed.
+    await yieldNotableWork();
+  })));
 }
 
 function limitPeopleByWeek(peopleByWeek) {
@@ -1523,7 +1268,20 @@ function limitPeopleByWeek(peopleByWeek) {
   });
 }
 
+function publishNotablePeople(peopleByWeek) {
+  limitPeopleByWeek(peopleByWeek);
+  markLoadedNotableWeeks(peopleByWeek);
+  const box = pinnedTooltipBox || hoveredWeekBox;
+  if (!box || !isBoxLived(box)) return;
+  if (!pinnedTooltipBox && notableHoverTimer !== null) return;
+  const people = peopleByWeek.get(getBoxGlobalWeek(box));
+  if (people?.length) {
+    renderWeekTooltipContent(box, Boolean(pinnedTooltipBox), people);
+  }
+}
+
 async function loadNotableLifespansForAge(ageYears) {
+  notablePrefetchQueue.delete(ageYears);
   if (notableAgeRequests.has(ageYears)) {
     return notableAgeRequests.get(ageYears);
   }
@@ -1531,27 +1289,34 @@ async function loadNotableLifespansForAge(ageYears) {
   const cachedPeopleByWeek = readCachedPeopleByWeek(ageYears);
   if (cachedPeopleByWeek) {
     markLoadedNotableWeeks(cachedPeopleByWeek);
+    notableAgeRequests.set(ageYears, Promise.resolve(cachedPeopleByWeek));
     return cachedPeopleByWeek;
   }
 
   const request = (async () => {
     const peopleByWeek = new Map();
     const seenIds = new Set();
-    let continueToken = null;
+    let page = await fetchCommonsAgeCategoryPage(ageYears, null);
     for (let pageIndex = 0; pageIndex < COMMONS_CATEGORY_PAGE_LIMIT; pageIndex++) {
-      const page = await fetchCommonsAgeCategoryPage(ageYears, continueToken);
-      await addNotableIdsToWeeks(page.ids, peopleByWeek, seenIds);
-      limitPeopleByWeek(peopleByWeek);
-      markLoadedNotableWeeks(peopleByWeek);
-      if (peopleByWeek.size >= NOTABLE_WEEK_COVERAGE_TARGET) break;
-      continueToken = page.continueToken;
-      if (!continueToken) break;
+      // Overlap the next category page with entity downloads, keeping only one
+      // page ahead. Capture failures immediately to avoid unhandled rejections.
+      const nextPage = page.continueToken && pageIndex + 1 < COMMONS_CATEGORY_PAGE_LIMIT
+        ? fetchCommonsAgeCategoryPage(ageYears, page.continueToken).then(
+          (value) => ({ value }), (error) => ({ error })
+        )
+        : null;
+      await addNotableIdsToWeeks(page.ids, peopleByWeek, seenIds, ageYears);
+      if (peopleByWeek.size >= NOTABLE_WEEK_COVERAGE_TARGET || !nextPage) break;
+      const result = await nextPage;
+      if (result.error) throw result.error;
+      page = result.value;
     }
-    limitPeopleByWeek(peopleByWeek);
-    markLoadedNotableWeeks(peopleByWeek);
     cachePeopleByWeek(ageYears, peopleByWeek);
     return peopleByWeek;
-  })();
+  })().catch((error) => {
+    notableAgeRequests.delete(ageYears);
+    throw error;
+  });
 
   notableAgeRequests.set(ageYears, request);
   return request;
@@ -1582,8 +1347,10 @@ async function findNotableLifespansForBox(box) {
       return people;
     })
     .catch((err) => {
-      failedNotableLifespanWeeks.add(globalWeek);
       notableLifespanRequests.delete(globalWeek);
+      const people = notableLifespansByWeek.get(globalWeek);
+      if (people?.length) return people;
+      failedNotableLifespanWeeks.add(globalWeek);
       console.warn("Failed to load notable lifespans from Wikidata:", err);
       throw err;
     });
@@ -1591,7 +1358,7 @@ async function findNotableLifespansForBox(box) {
   return request;
 }
 
-function positionWeekTooltip(event, box) {
+function positionWeekTooltip(box) {
   const viewportPadding = 8;
   const tooltipWidth = weekTooltip.offsetWidth || 0;
   const rect = box.getBoundingClientRect();
@@ -1612,31 +1379,68 @@ function positionWeekTooltip(event, box) {
 
 function repositionPinnedTooltip() {
   if (!pinnedTooltipBox || weekTooltip.hidden) return;
-  positionWeekTooltip({}, pinnedTooltipBox);
-}
-
-function appendTooltipStatus(text, isLoading = false) {
-  const status = document.createElement("div");
-  status.className = "week-tooltip-status";
-  status.classList.toggle("is-loading", isLoading);
-  status.textContent = text;
-  weekTooltip.appendChild(status);
+  positionWeekTooltip(pinnedTooltipBox);
 }
 
 function prefetchNotableLifespansForAge(ageYears) {
-  if (!Number.isFinite(ageYears)) return;
-  loadNotableLifespansForAge(ageYears).catch((err) => {
-    console.warn("Failed to preload notable lifespans from Wikidata:", err);
-  });
+  if (!Number.isInteger(ageYears) || ageYears < 0 || ageYears > MAX_AGE_YEARS) return;
+  if (notableAgeRequests.has(ageYears)) return;
+  notablePrefetchQueue.add(ageYears);
+  drainNotablePrefetches();
 }
 
-function renderWeekTooltipContent(
-  box,
-  event,
-  shouldPin,
-  markers,
-  showEmptyStatus = true
-) {
+function drainNotablePrefetches() {
+  while (notablePrefetchEnabled && activeNotablePrefetches < NOTABLE_PREFETCH_CONCURRENCY && notablePrefetchQueue.size) {
+    const ageYears = notablePrefetchQueue.values().next().value;
+    notablePrefetchQueue.delete(ageYears);
+    if (notableAgeRequests.has(ageYears)) continue;
+    activeNotablePrefetches += 1;
+    loadNotableLifespansForAge(ageYears).catch((err) => {
+      console.warn("Failed to preload notable lifespans from Wikidata:", err);
+    }).finally(() => {
+      activeNotablePrefetches -= 1;
+      drainNotablePrefetches();
+    });
+  }
+}
+
+function observeNotableRows() {
+  notableRowsObserver?.disconnect();
+  notablePrefetchQueue.clear();
+  if (!("IntersectionObserver" in window)) return;
+  if (!notableRowsObserver) {
+    notableRowsObserver = new IntersectionObserver((entries) => {
+      // Queue visible rows before the rows just outside the viewport.
+      const distanceFromViewport = ({ boundingClientRect: rect }) =>
+        Math.max(0, -rect.bottom, rect.top - window.innerHeight);
+      entries.sort((a, b) => distanceFromViewport(a) - distanceFromViewport(b)
+        || a.boundingClientRect.top - b.boundingClientRect.top);
+      entries.forEach((entry) => {
+        const ageYears = getBoxAgeYears(entry.target);
+        if (entry.isIntersecting) {
+          if (!notableAgeRequests.has(ageYears)) notablePrefetchQueue.add(ageYears);
+        } else {
+          notablePrefetchQueue.delete(ageYears);
+        }
+      });
+      drainNotablePrefetches();
+    }, { rootMargin: "240px 0px" });
+  }
+  // One observed cell represents each year; only lived rows need biographies.
+  for (let index = 0; index < getLivedGlobalWeekLimit(); index += WEEKS_PER_YEAR) {
+    const box = lifeBoxes.children[index];
+    if (box) notableRowsObserver.observe(box);
+  }
+}
+
+function renderWeekTooltipContent(box, shouldPin, markers) {
+  if (!isBoxLived(box) || !markers.length) {
+    if (shouldPin) unpinWeekTooltip();
+    else hideTooltip();
+    return;
+  }
+
+  if (shouldPin) selectWeekBox(box);
   weekTooltip.classList.toggle("is-pinned", shouldPin);
   weekTooltip.replaceChildren();
 
@@ -1672,26 +1476,22 @@ function renderWeekTooltipContent(
     weekTooltip.appendChild(personLine);
   });
 
-  if (showEmptyStatus && markers.length === 0) {
-    appendTooltipStatus("No notable lives here.");
-  }
-
   weekTooltip.hidden = false;
-  positionWeekTooltip(event, box);
+  positionWeekTooltip(box);
 }
 
-function renderWeekTooltip(box, event, shouldPin = false) {
+function renderWeekTooltip(box, shouldPin = false) {
+  cancelNotableHover();
   const renderId = ++weekTooltipRenderId;
   const globalWeek = getBoxGlobalWeek(box);
   if (!isGlobalWeekLived(globalWeek)) {
-    renderWeekTooltipContent(box, event, shouldPin, [], false);
+    renderWeekTooltipContent(box, shouldPin, []);
     return;
   }
 
   if (notableLifespansByWeek.has(globalWeek)) {
     renderWeekTooltipContent(
       box,
-      event,
       shouldPin,
       notableLifespansByWeek.get(globalWeek)
     );
@@ -1699,38 +1499,25 @@ function renderWeekTooltip(box, event, shouldPin = false) {
   }
 
   if (failedNotableLifespanWeeks.has(globalWeek)) {
-    renderWeekTooltipContent(box, event, shouldPin, [], false);
-    appendTooltipStatus("Could not load notable lives.");
-    positionWeekTooltip(event, box);
+    renderWeekTooltipContent(box, shouldPin, []);
     return;
   }
 
-  weekTooltip.classList.toggle("is-pinned", shouldPin);
-  weekTooltip.replaceChildren();
-
-  const ageLine = document.createElement("div");
-  ageLine.className = "week-tooltip-age";
-  ageLine.textContent = getBoxAgeLabel(box);
-  weekTooltip.appendChild(ageLine);
-  appendTooltipStatus("Loading notable lives...", true);
-
-  weekTooltip.hidden = false;
-  positionWeekTooltip(event, box);
+  // Keep the map quiet until there is actual person information to show.
+  hideTooltip();
 
   findNotableLifespansForBox(box)
     .then((markers) => {
       if (renderId !== weekTooltipRenderId) return;
       if (!shouldPin && hoveredWeekBox !== box) return;
       if (shouldPin && pinnedTooltipBox !== box) return;
-      renderWeekTooltipContent(box, event, shouldPin, markers);
+      renderWeekTooltipContent(box, shouldPin, markers);
     })
     .catch(() => {
       if (renderId !== weekTooltipRenderId) return;
       if (!shouldPin && hoveredWeekBox !== box) return;
       if (shouldPin && pinnedTooltipBox !== box) return;
-      renderWeekTooltipContent(box, event, shouldPin, [], false);
-      appendTooltipStatus("Could not load notable lives.");
-      positionWeekTooltip(event, box);
+      renderWeekTooltipContent(box, shouldPin, []);
     });
 }
 
@@ -1740,7 +1527,6 @@ function selectWeekBox(box) {
   }
   selectedWeekBox = box;
   selectedWeekBox.classList.add("is-selected");
-  lifeBoxes.classList.add("has-selection");
 }
 
 function clearSelectedWeekBox() {
@@ -1748,29 +1534,6 @@ function clearSelectedWeekBox() {
     selectedWeekBox.classList.remove("is-selected");
   }
   selectedWeekBox = null;
-  lifeBoxes.classList.remove("has-selection");
-}
-
-function isPointerInsideBox(event, box) {
-  if (!box) return false;
-  const rect = box.getBoundingClientRect();
-  return (
-    event.clientX >= rect.left &&
-    event.clientX <= rect.right &&
-    event.clientY >= rect.top &&
-    event.clientY <= rect.bottom
-  );
-}
-
-function isPointerInsideElement(event, element) {
-  if (!element) return false;
-  const rect = element.getBoundingClientRect();
-  return (
-    event.clientX >= rect.left &&
-    event.clientX <= rect.right &&
-    event.clientY >= rect.top &&
-    event.clientY <= rect.bottom
-  );
 }
 
 function hideHoverTooltip() {
@@ -1819,12 +1582,20 @@ if (weekTooltip && lifeBoxes) {
     if (pinnedTooltipBox) return;
     rememberPointer(event);
     const target = event.target.closest(".life-box");
-    if (!target || !target.dataset.week || !target.dataset.year) {
+    if (!target || !target.dataset.week || !target.dataset.year || !isBoxLived(target)) {
       hideHoverTooltip();
       return;
     }
     hoveredWeekBox = target;
-    renderWeekTooltip(target, event);
+    cancelNotableHover();
+    if (notableLifespansByWeek.has(getBoxGlobalWeek(target))) {
+      renderWeekTooltip(target);
+    } else {
+      notableHoverTimer = setTimeout(() => {
+        notableHoverTimer = null;
+        if (hoveredWeekBox === target && !pinnedTooltipBox) renderWeekTooltip(target);
+      }, NOTABLE_HOVER_DELAY_MS);
+    }
   });
 
   lifeBoxes.addEventListener("pointerout", (event) => {
@@ -1846,19 +1617,8 @@ if (weekTooltip && lifeBoxes) {
       if (!pinnedTooltipBox) hideHoverTooltip();
       return;
     }
-    if (weekTooltip.hidden) return;
+    if (weekTooltip.hidden || pinnedTooltipBox) return;
     syncHoverTooltipVisibility();
-    if (weekTooltip.hidden) return;
-    if (pinnedTooltipBox) {
-      return;
-    }
-    const elementAtPointer = document.elementFromPoint(event.clientX, event.clientY);
-    const boxAtPointer = elementAtPointer
-      ? elementAtPointer.closest(".life-box")
-      : null;
-    if (!boxAtPointer || boxAtPointer !== hoveredWeekBox) {
-      hideHoverTooltip();
-    }
   });
 
   lifeBoxes.addEventListener("click", (event) => {
@@ -1869,8 +1629,7 @@ if (weekTooltip && lifeBoxes) {
       return;
     }
     pinnedTooltipBox = target;
-    selectWeekBox(target);
-    renderWeekTooltip(target, event, true);
+    renderWeekTooltip(target, true);
   });
 
   lifeBoxes.addEventListener("keydown", (event) => {
@@ -1883,8 +1642,7 @@ if (weekTooltip && lifeBoxes) {
       return;
     }
     pinnedTooltipBox = target;
-    selectWeekBox(target);
-    renderWeekTooltip(target, event, true);
+    renderWeekTooltip(target, true);
   });
 
   lifeBoxes.addEventListener("pointerleave", () => {
@@ -1969,27 +1727,32 @@ function renderFromDob(value) {
   const dobDate = validation.date;
   const ageYears = calculateAgeYears(dobDate);
   lastDobDate = dobDate;
+  // Use the flip animation to warm the current age and the start of the map.
+  notablePrefetchEnabled = true;
+  prefetchNotableLifespansForAge(getAgePosition(dobDate, today).ageYears);
+  prefetchNotableLifespansForAge(0);
   const ratio = ageYears / lifeExpectancyYears;
   const shouldDeferClockMotion = !document.body.classList.contains("has-results");
   if (shouldDeferClockMotion) {
     document.body.classList.add("is-flip-pending");
   }
   updateClock(ratio, { deferMotion: shouldDeferClockMotion });
-  updateLifeGrid(ageYears, dobDate);
-  flipFormShell(true);
-  if (typeof window.updateSharePreviewOverlay === "function") {
-    window.updateSharePreviewOverlay();
+  if (!shouldDeferClockMotion) {
+    updateLifeGrid(dobDate);
   }
+  flipFormShell(true);
 }
 
 function hideVisuals() {
+  notablePrefetchEnabled = false;
+  notablePrefetchQueue.clear();
+  notableRowsObserver?.disconnect();
   clockPanel.hidden = true;
   clockPanel.classList.remove("is-visible");
   lifeGrid.hidden = true;
   lifeGrid.classList.remove("is-visible");
   flipFormShell(false);
-  hideTooltip();
-  updateResultHeadings();
+  unpinWeekTooltip();
 }
 
 if (dobInput) {
@@ -2017,11 +1780,6 @@ function reRenderIfHasResults() {
   renderFromDob(dobInput.value);
 }
 
-function applyQaDefaults() {
-  if (!QA_MODE) return;
-  syncDobValue();
-}
-
 if (dobInput) {
   dobInput.addEventListener("change", () => {
     syncDobValue();
@@ -2037,142 +1795,33 @@ if (dobInput) {
   });
 }
 
-async function saveBlob(blob, filename, mimeType) {
-  if (!blob) return false;
-  if (window.showSaveFilePicker) {
-    try {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: filename,
-        types: [
-          {
-            description: mimeType === "application/pdf" ? "PDF file" : "PNG image",
-            accept: { [mimeType]: [mimeType === "application/pdf" ? ".pdf" : ".png"] },
-          },
-        ],
-      });
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      return true;
-    } catch (err) {
-      if (err && err.name === "AbortError") return true;
-      console.warn("Save picker failed, falling back to download:", err);
+function refreshLifeGridScale(forPrint = false) {
+  if (!document.body.classList.contains("has-results") || lifeGrid.hidden) return;
+  printGridScale = forPrint;
+  if (lifeGridScaleFrame !== null) return;
+  lifeGridScaleFrame = requestAnimationFrame(() => {
+    lifeGridScaleFrame = null;
+    if (!document.body.classList.contains("has-results") || lifeGrid.hidden) return;
+    if (!printGridScale) {
+      updateLifeBoxScale();
+      return;
     }
-  }
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-  return true;
-}
-
-function refreshLifeGridScale(shouldScaleForPrint = false) {
-  if (!document.body.classList.contains("has-results")) return;
-  if (!QA_MODE && !dobInput.value.trim()) return;
-  if (lastDobDate) {
-    updateLifeGrid(calculateAgeYears(lastDobDate), lastDobDate);
-  }
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      setPrintBoxScale(shouldScaleForPrint);
-    });
+    const availableWidth = lifeGridInner.clientWidth;
+    if (!availableWidth) return;
+    const gapRatio = BASE_LIFE_BOX_GAP / BASE_LIFE_BOX_SIZE;
+    const boxSize = Math.max(0.5, Math.min(BASE_LIFE_BOX_SIZE,
+      availableWidth / (WEEKS_PER_YEAR + (WEEKS_PER_YEAR - 1) * gapRatio)));
+    const boxGap = boxSize * gapRatio;
+    lifeBoxes.style.setProperty("--life-box-size", `${boxSize.toFixed(2)}px`);
+    lifeBoxes.style.setProperty("--life-box-gap", `${boxGap.toFixed(2)}px`);
+    lifeGrid.style.setProperty("--life-grid-width",
+      `${WEEKS_PER_YEAR * (boxSize + boxGap) - boxGap}px`);
   });
 }
 
-function setPrintBoxScale(active) {
-  if (!lifeGrid || !lifeBoxes) return;
-  if (!active) {
-    lifeBoxes.style.removeProperty("--life-box-size");
-    lifeBoxes.style.removeProperty("--life-box-gap");
-    if (lifeGrid) {
-      lifeGrid.style.removeProperty("--life-grid-width");
-    }
-    return;
-  }
-  const cols = WEEKS_PER_YEAR;
-  if (!cols) return;
-  const container =
-    lifeBoxes.closest(".life-grid-inner") || lifeBoxes.parentElement;
-  const availableWidth =
-    (container && container.clientWidth) ||
-    document.documentElement.clientWidth ||
-    lifeGrid.clientWidth;
-  if (!availableWidth) return;
-  const gapRatio = BASE_LIFE_BOX_GAP / BASE_LIFE_BOX_SIZE;
-  const sizeFromWidth = availableWidth / (cols + (cols - 1) * gapRatio);
-  const boxSize = Math.max(
-    0.5,
-    Math.min(BASE_LIFE_BOX_SIZE, sizeFromWidth)
-  );
-  const boxGap = boxSize * gapRatio;
-  const gridWidth =
-    WEEKS_PER_YEAR * (boxSize + boxGap) - boxGap;
-  lifeBoxes.style.setProperty("--life-box-size", `${boxSize.toFixed(2)}px`);
-  lifeBoxes.style.setProperty("--life-box-gap", `${boxGap.toFixed(2)}px`);
-  if (lifeGrid) {
-    lifeGrid.style.setProperty(
-      "--life-grid-width",
-      `${gridWidth.toFixed(2)}px`
-    );
-  }
-}
-
-if (typeof window.matchMedia === "function") {
-  const printMedia = window.matchMedia("print");
-  if (typeof printMedia.addEventListener === "function") {
-    printMedia.addEventListener("change", (event) => {
-      if (event.matches) {
-        setTimeout(() => refreshLifeGridScale(true), 0);
-      } else {
-        refreshLifeGridScale(false);
-      }
-    });
-  }
-}
-
-window.addEventListener("beforeprint", () => {
-  if (lifeBoxes) {
-    cachedLifeBoxSize = lifeBoxes.style.getPropertyValue("--life-box-size");
-    cachedLifeBoxGap = lifeBoxes.style.getPropertyValue("--life-box-gap");
-  }
-  setTimeout(() => refreshLifeGridScale(true), 0);
-});
-
-window.addEventListener("afterprint", () => {
-  if (lifeBoxes) {
-    if (cachedLifeBoxSize) {
-      lifeBoxes.style.setProperty("--life-box-size", cachedLifeBoxSize);
-    } else {
-      lifeBoxes.style.removeProperty("--life-box-size");
-    }
-    if (cachedLifeBoxGap) {
-      lifeBoxes.style.setProperty("--life-box-gap", cachedLifeBoxGap);
-    } else {
-      lifeBoxes.style.removeProperty("--life-box-gap");
-    }
-  }
-  setTimeout(() => {
-    if (document.body.classList.contains("has-results") && lastDobDate) {
-      updateLifeGrid(calculateAgeYears(lastDobDate), lastDobDate);
-    } else {
-      refreshLifeGridScale(false);
-    }
-  }, 200);
-});
-
-function guardShare(button) {
-  if (!document.body.classList.contains("has-results")) {
-    alert("Submit your info first to generate a share image.");
-    return false;
-  }
-  if (button) {
-    button.disabled = true;
-    button.classList.add("loading");
-  }
-  return true;
-}
+printMedia.addEventListener("change", (event) => refreshLifeGridScale(event.matches));
+window.addEventListener("beforeprint", () => refreshLifeGridScale(true));
+window.addEventListener("afterprint", () => refreshLifeGridScale(false));
 
 function buildSocialShareText(includeEmoji = false) {
   const readout = lastClockState ? lastClockState.readout : "xx:xx";
@@ -2193,65 +1842,14 @@ function openShareUrl(url) {
 
 function handleShareMenuClick(event) {
   const button = event.target.closest(".share-menu-item");
-  if (!button) return;
-  const panel = button.closest(".share-menu-list");
-  if (!panel) return;
-  const source = panel.dataset.shareSource;
+  if (!button || !lastClockState || !lastGridStats) return;
   const target = button.dataset.shareTarget;
-  const shareUrl = encodeURIComponent(window.location.href);
-
-  if (source === "clock") {
-    if (!lastClockState) {
-      alert("Nothing to share yet—try submitting first.");
-      return;
-    }
-    buildClockShareCanvas(lastClockState).then((canvas) => {
-      const shareText = encodeURIComponent(buildSocialShareText(target === "x"));
-      const filenameBase = "my";
-      const clockFilename = `${filenameBase}-lifeclock.png`;
-      if (target === "download") {
-        saveImageFromCanvas(canvas, clockFilename, buildSocialShareText(true));
-      } else if (target === "share") {
-        if (!guardShare(button)) return;
-        shareCanvas(canvas, clockFilename, button, buildSocialShareText(true)).then(
-          (result) => {
-            if (result === "unsupported") {
-              alert("Sharing isn't supported on this device.");
-            }
-          }
-        );
-      } else if (target === "x") {
-        openShareUrl(`https://twitter.com/intent/tweet?text=${shareText}`);
-      } else if (target === "threads") {
-        openShareUrl(`https://www.threads.net/intent/post?text=${shareText}`);
-      }
-    });
-  } else if (source === "grid") {
-    if (!lastGridStats) {
-      alert("Nothing to share yet—try submitting first.");
-      return;
-    }
-    const canvas = buildGridShareCanvas(lastGridStats);
-    const shareText = encodeURIComponent(buildSocialShareText(target === "x"));
-    const filenameBase = "my";
-    const gridFilename = `${filenameBase}-lifemap.png`;
-    if (target === "download") {
-      saveImageFromCanvas(canvas, gridFilename, buildSocialShareText(true));
-    } else if (target === "share") {
-      if (!guardShare(button)) return;
-      shareCanvas(canvas, gridFilename, button, buildSocialShareText(true)).then(
-        (result) => {
-          if (result === "unsupported") {
-            alert("Sharing isn't supported on this device.");
-          }
-        }
-      );
-    } else if (target === "x") {
-      openShareUrl(`https://twitter.com/intent/tweet?text=${shareText}`);
-    } else if (target === "threads") {
-      openShareUrl(`https://www.threads.net/intent/post?text=${shareText}`);
-    }
-  }
+  if (target !== "x" && target !== "threads") return;
+  const shareText = encodeURIComponent(buildSocialShareText(target === "x"));
+  const endpoint = target === "x"
+    ? "https://twitter.com/intent/tweet?text="
+    : "https://www.threads.net/intent/post?text=";
+  openShareUrl(endpoint + shareText);
 }
 
 if (resultsSharePanel) {
@@ -2282,20 +1880,13 @@ function initShareTitleWave() {
 window.addEventListener("resize", () => {
   if (document.body.classList.contains("has-results")) {
     hideHoverTooltipIfUnpinned();
-    updateLifeBoxScale();
+    refreshLifeGridScale(printMedia.matches);
   }
 });
 
-updateResultHeadings();
-if (copyrightYear) {
-  const startYear = 2025;
-  const currentYear = new Date().getFullYear();
-  copyrightYear.textContent =
-    currentYear > startYear ? `${startYear} - ${currentYear}` : String(startYear);
-}
 initShareTitleWave();
+initClockAtmosphere();
 
 if (QA_MODE && !document.body.classList.contains("has-results")) {
-  applyQaDefaults();
   renderFromDob(dobInput.value);
 }
